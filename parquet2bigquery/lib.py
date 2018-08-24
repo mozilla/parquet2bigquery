@@ -19,7 +19,7 @@ import re
 from datetime import datetime
 from parquet2bigquery.logs import configure_logging
 
-from multiprocessing import Process, Queue
+from multiprocessing import Process, JoinableQueue
 
 
 log = configure_logging()
@@ -460,7 +460,7 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 def bulk(bucket_name, prefix, concurrency=5):
     objects = get_latest_object(bucket_name, prefix)
 
-    q = Queue()
+    q = JoinableQueue()
 
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c, q,))
