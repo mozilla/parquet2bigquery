@@ -18,15 +18,14 @@ import re
 
 from datetime import datetime
 from parquet2bigquery.logs import configure_logging
-from collections import defaultdict
 
-from multiprocessing import Pool
+from multiprocessing import Process, Queue
+
 
 log = configure_logging()
 
 # defaults
 DEFAULT_DATASET = getenv('DEFAULT_DATASET', 'tmp')
-
 
 ignore_patterns = [
     r'.*/$',  # dirs
@@ -37,6 +36,10 @@ ignore_patterns = [
 
 
 class ParquetFormatError(Exception):
+    pass
+
+
+class BQLoadError(Exception):
     pass
 
 
@@ -96,6 +99,7 @@ def build_tree(schema, children):
             'type': bq_legacy_types(elem_type),
             'mode': bq_modes(repetition_type),
         }
+
         if elem_type == 'group':
             children = build_tree(schema, elem.num_children)
             leaf['fields'] = children
@@ -277,12 +281,9 @@ def _compare_columns(col1, col2):
     if isinstance(col1, tuple):
         for i in range(len(col1)):
             a.append(_compare_columns(col1[i], col2[i]))
-            # print(col)
-            # print(col1)
 
     if isinstance(col1, google.cloud.bigquery.schema.SchemaField):
         if col1.fields and col2.fields:
-            # print(col1.fields, col2.fields)
             a.append(_compare_columns(col1.fields, col2.fields))
 
         # if mode is changing from required to nullable ignore
@@ -399,7 +400,7 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
     return latest_objects
 
 
-def run(bucket_name, object):
+def run(bucket_name, object, bulk=None):
     if ignore_key(object):
         return
 
@@ -415,6 +416,7 @@ def run(bucket_name, object):
     new_schema = generate_bq_schema(bucket_name, object, date_partition_field, meta['partitions'])
 
     # check to see if the table exists if not create it
+
     if not check_bq_table_exists(table_id):
         try:
             create_bq_table(table_id, new_schema, date_partition_field)
@@ -427,10 +429,21 @@ def run(bucket_name, object):
     if len(schema_additions) > 0:
         update_bq_table_schema(table_id, schema_additions)
 
-    create_bq_table(table_id_tmp)
-    load_parquet_to_bq(bucket_name, object, table_id_tmp)
-    load_bq_query_to_table(query, table_id)
-    delete_bq_table(table_id_tmp)
+    if bulk:
+        obj = '%s/*' % bulk
+    else:
+        obj = object
+
+    log.info('Starting to load:%s %s to bq' % (bucket_name, obj))
+    try:
+        create_bq_table(table_id_tmp)
+        load_parquet_to_bq(bucket_name, obj, table_id_tmp)
+        load_bq_query_to_table(query, table_id)
+    except:
+        log.exception('run error')
+        raise BQLoadError('BQ load failed')
+    finally:
+        delete_bq_table(table_id_tmp)
 
 
 def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
@@ -447,42 +460,31 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 def bulk(bucket_name, prefix, concurrency=5):
     objects = get_latest_object(bucket_name, prefix)
 
-    multi = []
+    q = Queue()
+
+    for c in range(concurrency):
+        p = Process(target=_bulk_run, args=(c, q,))
+        p.daemon = True
+        p.start()
+        log.info('Process-%d started' % c)
+
     for dir, object in objects.items():
-        multi.append((bucket_name, dir, object))
+        q.put((bucket_name, dir, object))
 
-    p = Pool(concurrency)
-    p.map(_bulk_run, multi)
+    print("Main thread waiting")
+    p.join()
 
 
-def _bulk_run(args):
-    bucket_name, dir, object = args
-
-    meta = _get_object_key_metadata(dir)
-
-    table_id = meta['table_id']
-    date_partition_field = meta['date_partition'][0]
-    date_partition_value = meta['date_partition'][1]
-
-    table_id_tmp = '_'.join([meta['table_id'], date_partition_value, tmp_prefix()])
-
-    query = construct_select_query(table_id_tmp, meta['date_partition'], partitions=meta['partitions'])
-    new_schema = generate_bq_schema(bucket_name, object, date_partition_field, meta['partitions'])
-
-    # check to see if the table exists if not create it
-    if not check_bq_table_exists(table_id):
+def _bulk_run(thread_id, q):
+    while True:
+        item = q.get()
+        bucket_name, dir, object = q.get()
+        log.info('Process-%d running %s' % (thread_id, dir))
         try:
-            create_bq_table(table_id, new_schema, date_partition_field)
-        except google.api_core.exceptions.Conflict:
-            pass
-
-    current_schema = get_bq_table_schema(table_id)
-    schema_additions = get_schema_diff(current_schema, new_schema)
-
-    if len(schema_additions) > 0:
-        update_bq_table_schema(table_id, schema_additions)
-
-    create_bq_table(table_id_tmp)
-    load_parquet_to_bq(bucket_name, dir+'/*', table_id_tmp)
-    load_bq_query_to_table(query, table_id)
-    delete_bq_table(table_id_tmp)
+            run(bucket_name, object, bulk=dir)
+        except BQLoadError as bq_error:
+            log.error(bq_error)
+            q.put(item)
+            log.warn('Re-queueed %s due to error' % item)
+        finally:
+            q.task_done()
