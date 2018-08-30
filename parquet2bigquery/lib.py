@@ -198,7 +198,7 @@ def create_bq_table(table_id, schema=None, partition_field=None,
     table = client.create_table(table)
 
     assert table.table_id == table_id
-    log.info('BigQuery table %s created.' % table_id)
+    log.info('%s: table created.' % table_id)
 
 
 def get_bq_table_schema(table_id, dataset=DEFAULT_DATASET):
@@ -227,7 +227,7 @@ def update_bq_table_schema(table_id, schema_additions,
 
     table.schema = new_schema
     table = client.update_table(table, ['schema'])
-    log.info('BigQuery table schema updated for table %s.' % table_id)
+    log.info('%s: BigQuery table schema updated.' % table_id)
 
 
 def generate_bq_schema(bucket, object, date_partition_field=None,
@@ -275,7 +275,7 @@ def load_parquet_to_bq(bucket, object, table_id, schema=None,
         job_config=job_config)
     assert load_job.job_type == 'load'
     load_job.result()
-    log.info('Parquet file %s loaded into BigQuery table %s.' % (object, table_id))
+    log.info('%s: Parquet file %s loaded into BigQuery.' % (table_id, object))
 
 
 # we need to check and see what is changing
@@ -347,7 +347,7 @@ def load_bq_query_to_table(query, table_id,
 
     query_job = client.query(query, job_config=job_config)
     query_job.result()
-    log.info('Query results loaded to table {}.'.format(table_ref.path))
+    log.info('{}: Query results loaded'.format(table_id))
 
 
 def check_bq_table_exists(table_id, dataset=DEFAULT_DATASET):
@@ -357,10 +357,10 @@ def check_bq_table_exists(table_id, dataset=DEFAULT_DATASET):
     try:
         table = client.get_table(table_ref)
         if table:
-            log.info('BigQuery table {} exists.'.format(table_id))
+            log.info('{}: table exists.'.format(table_id))
             return True
     except google.api_core.exceptions.NotFound:
-        log.info('BigQuery table {} does not exists.'.format(table_id))
+        log.info('{}: table does not exist.'.format(table_id))
         return False
 
 
@@ -369,7 +369,7 @@ def delete_bq_table(table_id, dataset=DEFAULT_DATASET):
     dataset_ref = client.dataset(dataset)
     table_ref = dataset_ref.table(table_id)
     client.delete_table(table_ref)
-    log.info('BigQuery table {} deleted.'.format(table_id))
+    log.info('{}: table deleted.'.format(table_id))
 
 
 def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
