@@ -43,6 +43,10 @@ class BQLoadError(Exception):
     pass
 
 
+class BQLoadWarning(Exception):
+    pass
+
+
 def tmp_prefix(size=5):
     char_set = string.ascii_lowercase + string.digits
     return ''.join(random.choice(char_set) for x in range(size))
@@ -442,9 +446,12 @@ def run(bucket_name, object, bulk=None):
         create_bq_table(table_id_tmp)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp)
         load_bq_query_to_table(query, table_id)
+    except google.api_core.exceptions.BadRequest:
+        log.exception('%s: BigQuery BadReuqest' % table_id)
+        raise BQLoadError('%s: BigQuery BadRequest' % table_id)
     except:
-        log.exception('%s: BQ Load Error' % table_id)
-        raise BQLoadError('BQ load failed')
+        log.exception('%s: BQ Load Warning' % table_id)
+        raise BQLoadWarning('BQ load failed')
     finally:
         delete_bq_table(table_id_tmp)
 
@@ -481,13 +488,12 @@ def bulk(bucket_name, prefix, concurrency=5):
 def _bulk_run(thread_id, q):
     while True:
         item = q.get()
-        bucket_name, dir, object = q.get()
+        bucket_name, dir, object = item
         log.info('Process-%d running %s' % (thread_id, dir))
         try:
             run(bucket_name, object, bulk=dir)
-        except BQLoadError as bq_error:
-            log.error(bq_error)
+        except BQLoadWarning:
             q.put(item)
-            log.warn('Re-queueed %s due to error' % item)
+            log.warn('Re-queueed %s due to warning' % (item,))
         finally:
             q.task_done()
