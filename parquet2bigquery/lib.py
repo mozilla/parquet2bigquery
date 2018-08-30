@@ -434,13 +434,16 @@ def run(bucket_name, object, bulk=None):
     else:
         obj = object
 
-    log.info('Starting to load:%s %s to bq' % (bucket_name, obj))
+    log.info('%s: starting to load %s/%s to BigQuery table %s' % (table_id,
+                                                                  bucket_name,
+                                                                  obj,
+                                                                  table_id_tmp))
     try:
         create_bq_table(table_id_tmp)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp)
         load_bq_query_to_table(query, table_id)
     except:
-        log.exception('run error')
+        log.exception('%s: BQ Load Error' % table_id)
         raise BQLoadError('BQ load failed')
     finally:
         delete_bq_table(table_id_tmp)
@@ -471,7 +474,7 @@ def bulk(bucket_name, prefix, concurrency=5):
     for dir, object in objects.items():
         q.put((bucket_name, dir, object))
 
-    print("Main thread waiting")
+    log.info("Main process waiting")
     p.join()
 
 
