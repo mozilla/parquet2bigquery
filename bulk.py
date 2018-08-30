@@ -23,6 +23,7 @@ def main():
     parser.add_argument("-c", "--concurrency",
                         help="Process concurrency",
                         default=10,
+                        type=int,
                         action="store")
 
     args = parser.parse_args()
