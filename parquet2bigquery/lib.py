@@ -473,13 +473,13 @@ def bulk(bucket_name, prefix, concurrency):
 
     q = JoinableQueue()
 
+    for dir, object in objects.items():
+        q.put((bucket_name, dir, object))
+
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c, q,))
         p.daemon = True
         p.start()
-
-    for dir, object in objects.items():
-        q.put((bucket_name, dir, object))
 
     log.info('main_process: {} total tasks in queue'.format(q.qsize()))
 
