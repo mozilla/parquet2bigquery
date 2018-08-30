@@ -20,6 +20,7 @@ from datetime import datetime
 from parquet2bigquery.logs import configure_logging
 
 from multiprocessing import Process, JoinableQueue
+from time import sleep
 
 
 log = configure_logging()
@@ -467,7 +468,7 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 
 
 # we want to bulk load by a partition that makes sense
-def bulk(bucket_name, prefix, concurrency=5):
+def bulk(bucket_name, prefix, concurrency):
     objects = get_latest_object(bucket_name, prefix)
 
     q = JoinableQueue()
@@ -480,26 +481,33 @@ def bulk(bucket_name, prefix, concurrency=5):
     for dir, object in objects.items():
         q.put((bucket_name, dir, object))
 
-    log.info("Main process waiting")
-    p.join()
+    log.info('main_process: {} total tasks in queue'.format(q.qsize()))
 
-    if q.empty():
-        for c in range(concurrency):
-            q.put(None)
+    q.join()
+
+    log.info('main_process: {} total tasks in queue'.format(q.qsize()))
+
+    for c in range(concurrency):
+        q.put(None)
+
+    log.info('main_process: done')
 
 
-def _bulk_run(thread_id, q):
-    log.info('Process-{} started'.format(thread_id))
+def _bulk_run(process_id, q):
+    log.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
         bucket_name, dir, object = item
-        log.info('Process-{} running {}'.format(thread_id, dir))
         try:
+            log.info('Process-{}: running {}'.format(process_id, dir))
             run(bucket_name, object, bulk=dir)
         except BQLoadWarning:
             q.put(item)
-            log.warn('Re-queueed %s due to warning' % (item,))
+            log.warn('Process-{}: Re-queueed {} due to warning' % (process_id,
+                                                                   item,))
         finally:
             q.task_done()
+            log.info('Process-{}: {} tasks left in queue'.format(process_id,
+                                                                 q.qsize()))
     q.task_done()
-    log.info('Process-{} ended'.format(thread_id))
+    log.info('Process-{}: done'.format(process_id))
