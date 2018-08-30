@@ -476,7 +476,6 @@ def bulk(bucket_name, prefix, concurrency=5):
         p = Process(target=_bulk_run, args=(c, q,))
         p.daemon = True
         p.start()
-        log.info('Process-%d started' % c)
 
     for dir, object in objects.items():
         q.put((bucket_name, dir, object))
@@ -484,12 +483,17 @@ def bulk(bucket_name, prefix, concurrency=5):
     log.info("Main process waiting")
     p.join()
 
+    if q.empty():
+        for c in range(concurrency):
+            q.put(None)
+
 
 def _bulk_run(thread_id, q):
-    while True:
-        item = q.get()
+    log.info('Process-{} started'.format(thread_id))
+
+    for item in iter(q.get, None):
         bucket_name, dir, object = item
-        log.info('Process-%d running %s' % (thread_id, dir))
+        log.info('Process-{} running {}'.format(thread_id, dir))
         try:
             run(bucket_name, object, bulk=dir)
         except BQLoadWarning:
@@ -497,3 +501,5 @@ def _bulk_run(thread_id, q):
             log.warn('Re-queueed %s due to warning' % (item,))
         finally:
             q.task_done()
+    q.task_done()
+    log.info('Process-{} ended'.format(thread_id))
