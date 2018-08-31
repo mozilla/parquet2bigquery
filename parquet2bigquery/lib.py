@@ -406,8 +406,18 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
     return latest_objects
 
 
-def run(bucket_name, object, bulk=None):
+def create_primary_bq_table(table_id, new_schema, date_partition_field):
+    # check to see if the table exists if not create it
+    if not check_bq_table_exists(table_id):
+        try:
+            create_bq_table(table_id, new_schema, date_partition_field)
+        except google.api_core.exceptions.Conflict:
+            pass
+
+
+def run(bucket_name, object, dir=None):
     if ignore_key(object):
+        log.warning('Ignoring {}'.format(object))
         return
 
     meta = _get_object_key_metadata(object)
@@ -424,22 +434,14 @@ def run(bucket_name, object, bulk=None):
     new_schema = generate_bq_schema(bucket_name, object, date_partition_field,
                                     meta['partitions'])
 
-    # check to see if the table exists if not create it
-
-    if not check_bq_table_exists(table_id):
-        try:
-            create_bq_table(table_id, new_schema, date_partition_field)
-        except google.api_core.exceptions.Conflict:
-            pass
-
     current_schema = get_bq_table_schema(table_id)
     schema_additions = get_schema_diff(current_schema, new_schema)
 
     if len(schema_additions) > 0:
         update_bq_table_schema(table_id, schema_additions)
 
-    if bulk:
-        obj = '%s/*' % bulk
+    if dir:
+        obj = '%s/*' % dir
     else:
         obj = object
 
@@ -448,6 +450,7 @@ def run(bucket_name, object, bulk=None):
     try:
         create_bq_table(table_id_tmp)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp)
+        create_primary_bq_table(table_id, new_schema, date_partition_field)
         load_bq_query_to_table(query, table_id)
     except google.api_core.exceptions.BadRequest:
         log.exception('%s: BigQuery BadReuqest' % table_id)
@@ -471,13 +474,20 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 
 
 # we want to bulk load by a partition that makes sense
-def bulk(bucket_name, prefix, concurrency):
-    objects = get_latest_object(bucket_name, prefix)
+def bulk(bucket_name, prefix, concurrency, glob_load):
 
     q = JoinableQueue()
 
-    for dir, object in objects.items():
-        q.put((bucket_name, dir, object))
+    if glob_load:
+        log.info('main_process: loading via glob method')
+        objects = get_latest_object(bucket_name, prefix)
+        for dir, object in objects.items():
+            q.put((bucket_name, dir, object))
+    else:
+        log.info('main_process: loading via non-glob method')
+        objects = list_blobs_with_prefix(bucket_name, prefix)
+        for object in objects:
+            q.put((bucket_name, None, object))
 
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c, q,))
@@ -487,8 +497,6 @@ def bulk(bucket_name, prefix, concurrency):
     log.info('main_process: {} total tasks in queue'.format(q.qsize()))
 
     q.join()
-
-    log.info('main_process: {} total tasks in queue'.format(q.qsize()))
 
     for c in range(concurrency):
         q.put(None)
@@ -503,7 +511,7 @@ def _bulk_run(process_id, q):
         bucket_name, dir, object = item
         try:
             log.info('Process-{}: running {}'.format(process_id, dir))
-            run(bucket_name, object, bulk=dir)
+            run(bucket_name, object, dir=dir)
         except BQLoadWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {} due to warning' % (process_id,
