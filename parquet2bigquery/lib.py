@@ -18,7 +18,7 @@ from parquet2bigquery.parquet_format.ttypes import (FileMetaData, Type,
 from datetime import datetime
 from parquet2bigquery.logs import configure_logging
 
-from multiprocessing import Process, JoinableQueue
+from multiprocessing import Process, JoinableQueue, Lock
 
 
 log = configure_logging()
@@ -415,7 +415,7 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field):
             pass
 
 
-def run(bucket_name, object, dir=None):
+def run(bucket_name, object, dir=None, lock=None):
     if ignore_key(object):
         log.warning('Ignoring {}'.format(object))
         return
@@ -434,6 +434,15 @@ def run(bucket_name, object, dir=None):
     new_schema = generate_bq_schema(bucket_name, object, date_partition_field,
                                     meta['partitions'])
 
+    if lock:
+        lock.acquire()
+        try:
+            create_primary_bq_table(table_id, new_schema, date_partition_field)
+        finally:
+            lock.release()
+    else:
+        create_primary_bq_table(table_id, new_schema, date_partition_field)
+
     current_schema = get_bq_table_schema(table_id)
     schema_additions = get_schema_diff(current_schema, new_schema)
 
@@ -450,7 +459,6 @@ def run(bucket_name, object, dir=None):
     try:
         create_bq_table(table_id_tmp)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp)
-        create_primary_bq_table(table_id, new_schema, date_partition_field)
         load_bq_query_to_table(query, table_id)
     except google.api_core.exceptions.BadRequest:
         log.exception('%s: BigQuery BadReuqest' % table_id)
@@ -477,6 +485,7 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 def bulk(bucket_name, prefix, concurrency, glob_load):
 
     q = JoinableQueue()
+    lock = Lock()
 
     if glob_load:
         log.info('main_process: loading via glob method')
@@ -490,7 +499,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load):
             q.put((bucket_name, None, object))
 
     for c in range(concurrency):
-        p = Process(target=_bulk_run, args=(c, q,))
+        p = Process(target=_bulk_run, args=(c, lock, q,))
         p.daemon = True
         p.start()
 
@@ -504,14 +513,14 @@ def bulk(bucket_name, prefix, concurrency, glob_load):
     log.info('main_process: done')
 
 
-def _bulk_run(process_id, q):
+def _bulk_run(process_id, lock, q):
     log.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
         bucket_name, dir, object = item
         try:
             log.info('Process-{}: running {}'.format(process_id, dir))
-            run(bucket_name, object, dir=dir)
+            run(bucket_name, object, dir=dir, lock=lock)
         except BQLoadWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {} due to warning' % (process_id,
