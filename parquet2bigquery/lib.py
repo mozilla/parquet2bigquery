@@ -519,7 +519,8 @@ def _bulk_run(process_id, lock, q):
     for item in iter(q.get, None):
         bucket_name, dir, object = item
         try:
-            log.info('Process-{}: running {}'.format(process_id, dir))
+            o = object if dir is None else dir
+            log.info('Process-{}: running {}'.format(process_id, o))
             run(bucket_name, object, dir=dir, lock=lock)
         except BQLoadWarning:
             q.put(item)
