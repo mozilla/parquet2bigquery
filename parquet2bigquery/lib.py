@@ -473,9 +473,6 @@ def run(bucket_name, object, dir=None, lock=None):
     except google.api_core.exceptions.InternalServerError:
         log.exception('%s: BigQuery InternalServerError' % table_id)
         raise BQLoadWarning('BigQuery InternalServerError')
-    except:
-        log.exception('%s: BigQuery Load Warning' % table_id)
-        raise BQLoadWarning('BigQuery load failed')
     finally:
         delete_bq_table(table_id_tmp)
 
