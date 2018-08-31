@@ -348,7 +348,7 @@ def load_bq_query_to_table(query, table_id,
 
     query_job = client.query(query, job_config=job_config)
     query_job.result()
-    log.info('{}: Query results loaded'.format(table_id))
+    log.info('{}: query results loaded'.format(table_id))
 
 
 def check_bq_table_exists(table_id, dataset=DEFAULT_DATASET):
@@ -463,9 +463,12 @@ def run(bucket_name, object, dir=None, lock=None):
     except google.api_core.exceptions.BadRequest:
         log.exception('%s: BigQuery BadReuqest' % table_id)
         raise BQLoadError('%s: BigQuery BadRequest' % table_id)
+    except google.api_core.exceptions.InternalServerError:
+        log.exception('%s: BigQuery InternalServerError' % table_id)
+        raise BQLoadWarning('BigQuery InternalServerError')
     except:
-        log.exception('%s: BQ Load Warning' % table_id)
-        raise BQLoadWarning('BQ load failed')
+        log.exception('%s: BigQuery Load Warning' % table_id)
+        raise BQLoadWarning('BigQuery load failed')
     finally:
         delete_bq_table(table_id_tmp)
 
@@ -525,7 +528,7 @@ def _bulk_run(process_id, lock, q):
         except BQLoadWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {} due to warning' % (process_id,
-                                                                   item,))
+                                                                   object))
         finally:
             q.task_done()
             log.info('Process-{}: {} tasks left in queue'.format(process_id,
