@@ -1,12 +1,5 @@
-from parquet2bigquery.logs import configure_logging
 from parquet2bigquery.lib import bulk
 import argparse
-
-log = configure_logging()
-
-
-def bulk_load_parquet(bucket_name, prefix, concurrency=10):
-    bulk(bucket_name, prefix, concurrency)
 
 
 def main():
@@ -28,7 +21,7 @@ def main():
 
     args = parser.parse_args()
 
-    bulk_load_parquet(args.bucket, args.prefix, args.concurrency)
+    bulk(args.bucket, args.prefix, args.concurrency)
 
 
 main()

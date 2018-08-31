@@ -1,6 +1,11 @@
+import google.api_core.exceptions
+import struct
+import random
+import string
+import re
+
 from google.cloud import storage
 from google.cloud import bigquery
-import google.api_core.exceptions
 
 from io import BytesIO
 from os import getenv
@@ -8,19 +13,12 @@ from os import getenv
 from thrift.protocol import TCompactProtocol
 from thrift.transport import TTransport
 
-from parquet2bigquery.parquet_format.ttypes import FileMetaData, Type, FieldRepetitionType
-
-import struct
-import random
-import string
-import re
-
-
+from parquet2bigquery.parquet_format.ttypes import (FileMetaData, Type,
+                                                    FieldRepetitionType as FRT)
 from datetime import datetime
 from parquet2bigquery.logs import configure_logging
 
 from multiprocessing import Process, JoinableQueue
-from time import sleep
 
 
 log = configure_logging()
@@ -96,8 +94,9 @@ def build_tree(schema, children):
     for _ in range(children):
         elem = schema.pop(0)
 
-        elem_type = 'group' if elem.type is None else Type._VALUES_TO_NAMES[elem.type].lower()
-        repetition_type = FieldRepetitionType._VALUES_TO_NAMES[elem.repetition_type].lower()
+        elem_type = ('group' if elem.type is None
+                     else Type._VALUES_TO_NAMES[elem.type].lower())
+        repetition_type = FRT._VALUES_TO_NAMES[elem.repetition_type].lower()
 
         leaf = {
             'name': elem.name,
@@ -321,7 +320,8 @@ def construct_select_query(table_id, date_partition, partitions=None,
     date_value = str(datetime.strptime(date_partition[1],
                                        "%Y%m%d").strftime('%Y-%m-%d'))
 
-    s_items.append("CAST('{0}' AS DATE) as {1}".format(date_value, date_partition[0]))
+    s_items.append("CAST('{0}' AS DATE) as {1}".format(date_value,
+                                                       date_partition[0]))
 
     part_as = "'{1}' as {0}"
     for partition in partitions:
@@ -396,7 +396,8 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
 
     for blob in blobs:
         dir = '/'.join(blob.name.split('/')[0:-1])
-        if latest_objects_tmp.get(dir) and latest_objects_tmp[dir] < blob.updated:
+        if (latest_objects_tmp.get(dir)
+                and latest_objects_tmp[dir] < blob.updated):
             latest_objects_tmp[dir] = blob.updated
             latest_objects[dir] = blob.name
         else:
@@ -415,10 +416,13 @@ def run(bucket_name, object, bulk=None):
     date_partition_field = meta['date_partition'][0]
     date_partition_value = meta['date_partition'][1]
 
-    table_id_tmp = '_'.join([meta['table_id'], date_partition_value, tmp_prefix()])
+    table_id_tmp = '_'.join([meta['table_id'], date_partition_value,
+                            tmp_prefix()])
 
-    query = construct_select_query(table_id_tmp, meta['date_partition'], partitions=meta['partitions'])
-    new_schema = generate_bq_schema(bucket_name, object, date_partition_field, meta['partitions'])
+    query = construct_select_query(table_id_tmp, meta['date_partition'],
+                                   partitions=meta['partitions'])
+    new_schema = generate_bq_schema(bucket_name, object, date_partition_field,
+                                    meta['partitions'])
 
     # check to see if the table exists if not create it
 
@@ -439,10 +443,8 @@ def run(bucket_name, object, bulk=None):
     else:
         obj = object
 
-    log.info('%s: starting to load %s/%s to BigQuery table %s' % (table_id,
-                                                                  bucket_name,
-                                                                  obj,
-                                                                  table_id_tmp))
+    log.info('%s: loading %s/%s to BigQuery table %s' % (table_id, bucket_name,
+                                                         obj, table_id_tmp))
     try:
         create_bq_table(table_id_tmp)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp)
@@ -462,7 +464,8 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 
     schema = []
     for object in objects:
-        schema += generate_bq_schema(bucket_name, object, date_partition_field, partitions)
+        schema += generate_bq_schema(bucket_name, object,
+                                     date_partition_field, partitions)
 
     return set(schema)
 
