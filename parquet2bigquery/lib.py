@@ -381,7 +381,8 @@ def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
     objects = []
 
     for blob in blobs:
-        objects.append(blob.name)
+        if not ignore_key(blob.name):
+            objects.append(blob.name)
 
     return objects
 
@@ -395,13 +396,15 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
     latest_objects_tmp = {}
 
     for blob in blobs:
-        dir = '/'.join(blob.name.split('/')[0:-1])
-        if (latest_objects_tmp.get(dir)
-                and latest_objects_tmp[dir] < blob.updated):
-            latest_objects_tmp[dir] = blob.updated
-            latest_objects[dir] = blob.name
-        else:
-            latest_objects_tmp[dir] = blob.updated
+        if not ignore_key(blob.name):
+            dir = '/'.join(blob.name.split('/')[0:-1])
+            if latest_objects_tmp.get(dir):
+                if latest_objects_tmp[dir] < blob.updated:
+                    latest_objects_tmp[dir] = blob.updated
+                    latest_objects[dir] = blob.name
+            else:
+                latest_objects_tmp[dir] = blob.updated
+                latest_objects[dir] = blob.name
 
     return latest_objects
 
@@ -450,7 +453,11 @@ def run(bucket_name, object, dir=None, lock=None):
         update_bq_table_schema(table_id, schema_additions)
 
     if dir:
-        obj = '%s/*' % dir
+        obj = '{}/*'.format(dir)
+        if object.endswith('parquet'):
+            obj += 'parquet'
+        elif object.endswith('internal'):
+            obj += 'internal'
     else:
         obj = object
 
