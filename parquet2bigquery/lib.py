@@ -38,11 +38,11 @@ class ParquetFormatError(Exception):
     pass
 
 
-class BQLoadError(Exception):
+class GCError(Exception):
     pass
 
 
-class BQLoadWarning(Exception):
+class GCWarning(Exception):
     pass
 
 
@@ -434,8 +434,15 @@ def run(bucket_name, object, dir=None, lock=None):
 
     query = construct_select_query(table_id_tmp, meta['date_partition'],
                                    partitions=meta['partitions'])
-    new_schema = generate_bq_schema(bucket_name, object, date_partition_field,
-                                    meta['partitions'])
+
+    try:
+        new_schema = generate_bq_schema(bucket_name, object,
+                                        date_partition_field,
+                                        meta['partitions'])
+    except (google.api_core.exceptions.InternalServerError,
+            google.api_core.exceptions.ServiceUnavailable):
+        log.exception('%s: GCS Retryable Error' % table_id)
+        raise GCWarning('GCS Retryable Error')
 
     if lock:
         lock.acquire()
@@ -469,10 +476,11 @@ def run(bucket_name, object, dir=None, lock=None):
         load_bq_query_to_table(query, table_id)
     except google.api_core.exceptions.BadRequest:
         log.exception('%s: BigQuery BadReuqest' % table_id)
-        raise BQLoadError('%s: BigQuery BadRequest' % table_id)
-    except google.api_core.exceptions.InternalServerError:
-        log.exception('%s: BigQuery InternalServerError' % table_id)
-        raise BQLoadWarning('BigQuery InternalServerError')
+        raise GCError('%s: BigQuery Error' % table_id)
+    except (google.api_core.exceptions.InternalServerError,
+            google.api_core.exceptions.ServiceUnavailable):
+        log.exception('%s: BigQuery Retryable Error' % table_id)
+        raise GCWarning('BigQuery Retryable Error')
     finally:
         delete_bq_table(table_id_tmp)
 
@@ -529,10 +537,11 @@ def _bulk_run(process_id, lock, q):
             o = object if dir is None else dir
             log.info('Process-{}: running {}'.format(process_id, o))
             run(bucket_name, object, dir=dir, lock=lock)
-        except BQLoadWarning:
+        except GCWarning:
             q.put(item)
-            log.warn('Process-{}: Re-queueed {} due to warning' % (process_id,
-                                                                   object))
+            log.warn('Process-{}: Re-queueed {}'
+                     'due to warning'.format(process_id,
+                                             object))
         finally:
             q.task_done()
             log.info('Process-{}: {} tasks left in queue'.format(process_id,
