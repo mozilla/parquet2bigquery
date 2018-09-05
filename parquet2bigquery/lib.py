@@ -24,7 +24,7 @@ from multiprocessing import Process, JoinableQueue, Lock
 log = configure_logging()
 
 # defaults
-DEFAULT_DATASET = getenv('DEFAULT_DATASET', 'tmp')
+DEFAULT_DATASET = getenv('DEFAULT_DATASET', 'tmp4')
 
 ignore_patterns = [
     r'.*/$',  # dirs
@@ -337,6 +337,42 @@ def construct_select_query(table_id, date_partition, partitions=None,
     return query
 
 
+def check_bq_partition_exists(table_id, date_partition, partitions=None,
+                              dataset=DEFAULT_DATASET):
+    client = bigquery.Client()
+
+    count = 0
+    s_items = []
+    part_as = "{0} = '{1}'"
+
+    date_value = str(datetime.strptime(date_partition[1],
+                                       "%Y%m%d").strftime('%Y-%m-%d'))
+
+    s_items.append(part_as.format(date_partition[0], date_value))
+
+    for partition in partitions:
+        s_items.append(part_as.format(*partition))
+
+    _tmp_s = ' AND '.join(s_items)
+
+    query = """
+    SELECT 1
+    FROM {0}.{1}
+    WHERE {2}
+    LIMIT 10
+    """.format(dataset, table_id, _tmp_s)
+
+    query_job = client.query(query)
+    results = query_job.result()
+    for row in results:
+        count += 1
+
+    if count == 0:
+        return False
+    else:
+        return True
+
+
 def load_bq_query_to_table(query, table_id,
                            dataset=DEFAULT_DATASET):
     job_config = bigquery.QueryJobConfig()
@@ -418,7 +454,7 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field):
             pass
 
 
-def run(bucket_name, object, dir=None, lock=None):
+def run(bucket_name, object, dir=None, lock=None, resume=False):
     if ignore_key(object):
         log.warning('Ignoring {}'.format(object))
         return
@@ -431,6 +467,18 @@ def run(bucket_name, object, dir=None, lock=None):
 
     table_id_tmp = '_'.join([meta['table_id'], date_partition_value,
                             tmp_prefix()])
+
+    if resume:
+        try:
+            if check_bq_partition_exists(table_id, meta['date_partition'],
+                                         partitions=meta['partitions']):
+                log.warning('Ignoring {}, partition '
+                            'already exists'.format(object))
+                return
+        except (google.api_core.exceptions.InternalServerError,
+                google.api_core.exceptions.ServiceUnavailable):
+            log.exception('%s: BigQuery Retryable Error' % table_id)
+            raise GCWarning('BigQuery Retryable Error')
 
     query = construct_select_query(table_id_tmp, meta['date_partition'],
                                    partitions=meta['partitions'])
@@ -474,9 +522,6 @@ def run(bucket_name, object, dir=None, lock=None):
         create_bq_table(table_id_tmp)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp)
         load_bq_query_to_table(query, table_id)
-    except google.api_core.exceptions.BadRequest:
-        log.exception('%s: BigQuery BadReuqest' % table_id)
-        raise GCError('%s: BigQuery Error' % table_id)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         log.exception('%s: BigQuery Retryable Error' % table_id)
@@ -497,7 +542,7 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
 
 
 # we want to bulk load by a partition that makes sense
-def bulk(bucket_name, prefix, concurrency, glob_load):
+def bulk(bucket_name, prefix, concurrency, glob_load, resume_load):
 
     q = JoinableQueue()
     lock = Lock()
@@ -506,12 +551,12 @@ def bulk(bucket_name, prefix, concurrency, glob_load):
         log.info('main_process: loading via glob method')
         objects = get_latest_object(bucket_name, prefix)
         for dir, object in objects.items():
-            q.put((bucket_name, dir, object))
+            q.put((bucket_name, dir, object, resume_load))
     else:
         log.info('main_process: loading via non-glob method')
         objects = list_blobs_with_prefix(bucket_name, prefix)
         for object in objects:
-            q.put((bucket_name, None, object))
+            q.put((bucket_name, None, object, resume_load))
 
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c, lock, q,))
@@ -532,11 +577,11 @@ def _bulk_run(process_id, lock, q):
     log.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
-        bucket_name, dir, object = item
+        bucket_name, dir, object, resume_load = item
         try:
             o = object if dir is None else dir
             log.info('Process-{}: running {}'.format(process_id, o))
-            run(bucket_name, object, dir=dir, lock=lock)
+            run(bucket_name, object, dir=dir, lock=lock, resume=resume_load)
         except GCWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {}'
