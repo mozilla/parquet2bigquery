@@ -39,7 +39,7 @@ def main():
                               dest='resumeload',
                               action="store_false")
 
-    parser.set_defaults(resumeload=True)
+    parser.set_defaults(resumeload=False)
 
     args = parser.parse_args()
 
