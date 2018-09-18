@@ -16,6 +16,8 @@ from thrift.transport import TTransport
 from parquet2bigquery.parquet_format.ttypes import (FileMetaData, Type,
                                                     FieldRepetitionType as FRT)
 from datetime import datetime
+from dateutil.parser import parse
+
 from parquet2bigquery.logs import configure_logging
 
 from multiprocessing import Process, JoinableQueue, Lock
@@ -317,8 +319,7 @@ def construct_select_query(table_id, date_partition, partitions=None,
                            dataset=DEFAULT_DATASET):
     s_items = ['SELECT *']
 
-    date_value = str(datetime.strptime(date_partition[1],
-                                       "%Y%m%d").strftime('%Y-%m-%d'))
+    date_value = parse(date_partition[1]).strftime('%Y-%m-%d')
 
     s_items.append("CAST('{0}' AS DATE) as {1}".format(date_value,
                                                        date_partition[0]))
