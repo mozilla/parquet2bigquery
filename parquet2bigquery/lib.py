@@ -130,15 +130,16 @@ def bq_modes(elem):
 def bq_legacy_types(elem):
     CONVERSIONS = {
         'boolean': 'BOOLEAN',
+        'byte_array': 'STRING',
+        'double': 'FLOAT',
+        'fixed_len_byte_array': 'NUMERIC',
+        'float': 'FLOAT',
+        'group': 'RECORD',
         'int32': 'INTEGER',
         'int64': 'INTEGER',
         'int96': 'TIMESTAMP',
-        'float': 'FLOAT',
-        'double': 'FLOAT',
-        'byte_array': 'STRING',
-        'map': 'RECORD',
         'list': 'RECORD',
-        'group': 'RECORD',
+        'map': 'RECORD',
     }
 
     return CONVERSIONS[elem]
