@@ -466,7 +466,8 @@ def run(bucket_name, object, dir=None, lock=None, resume=False):
     date_partition_field = meta['date_partition'][0]
     date_partition_value = meta['date_partition'][1]
 
-    table_id_tmp = '_'.join([meta['table_id'], date_partition_value,
+    table_id_tmp = '_'.join([meta['table_id'],
+                            date_partition_value.replace("-", ""),
                             tmp_prefix()])
 
     if resume:
