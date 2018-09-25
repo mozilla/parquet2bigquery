@@ -131,11 +131,10 @@ def bq_modes(elem):
 
 
 def bq_legacy_types(elem):
-    byte_array = getenv('P2B_BYTE_ARRAY_TYPE', 'STRING')
 
     CONVERSIONS = {
         'boolean': 'BOOLEAN',
-        'byte_array': byte_array,
+        'byte_array': 'STRING',
         'double': 'FLOAT',
         'fixed_len_byte_array': 'NUMERIC',
         'float': 'FLOAT',
@@ -238,13 +237,11 @@ def update_bq_table_schema(table_id, schema_additions,
     log.info('%s: BigQuery table schema updated.' % table_id)
 
 
-def generate_bq_schema(bucket, object, date_partition_field=None,
+def generate_bq_schema(table_id, date_partition_field=None,
                        partitions=None):
-    from google.cloud.bigquery.schema import _parse_schema_resource
-
     p_fields = []
 
-    schema = get_parquet_schema(bucket, object)
+    schema = get_bq_table_schema(table_id)
 
     if date_partition_field:
         p_fields.append(bigquery.SchemaField(date_partition_field, 'DATE',
@@ -254,9 +251,7 @@ def generate_bq_schema(bucket, object, date_partition_field=None,
         p_fields.append(bigquery.SchemaField(part, 'STRING',
                                              mode='REQUIRED'))
 
-    schema_fields = build_tree(schema[1:], schema[0].num_children)
-
-    return p_fields + _parse_schema_resource({'fields': schema_fields})
+    return p_fields + schema
 
 
 def load_parquet_to_bq(bucket, object, table_id, schema=None,
@@ -411,8 +406,11 @@ def delete_bq_table(table_id, dataset=DEFAULT_DATASET):
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
     table_ref = dataset_ref.table(table_id)
-    client.delete_table(table_ref)
-    log.info('{}: table deleted.'.format(table_id))
+    try:
+        client.delete_table(table_ref)
+        log.info('{}: table deleted.'.format(table_id))
+    except google.api_core.exceptions.NotFound:
+        pass
 
 
 def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
@@ -489,8 +487,28 @@ def run(bucket_name, object, dir=None, lock=None, resume=False):
     query = construct_select_query(table_id_tmp, meta['date_partition'],
                                    partitions=meta['partitions'])
 
+    if dir:
+        obj = '{}/*'.format(dir)
+        if object.endswith('parquet'):
+            obj += 'parquet'
+        elif object.endswith('internal'):
+            obj += 'internal'
+    else:
+        obj = object
+
+    # we want to create the temp table and load the data
     try:
-        new_schema = generate_bq_schema(bucket_name, object,
+        create_bq_table(table_id_tmp)
+        load_parquet_to_bq(bucket_name, obj, table_id_tmp)
+    except (google.api_core.exceptions.InternalServerError,
+            google.api_core.exceptions.ServiceUnavailable):
+        delete_bq_table(table_id_tmp)
+        log.exception('%s: BigQuery Retryable Error' % table_id)
+        raise GCWarning('BigQuery Retryable Error')
+
+    # data is now loaded, we want to grab the schema of the table
+    try:
+        new_schema = generate_bq_schema(table_id_tmp,
                                         date_partition_field,
                                         meta['partitions'])
     except (google.api_core.exceptions.InternalServerError,
@@ -513,20 +531,11 @@ def run(bucket_name, object, dir=None, lock=None, resume=False):
     if len(schema_additions) > 0:
         update_bq_table_schema(table_id, schema_additions)
 
-    if dir:
-        obj = '{}/*'.format(dir)
-        if object.endswith('parquet'):
-            obj += 'parquet'
-        elif object.endswith('internal'):
-            obj += 'internal'
-    else:
-        obj = object
-
     log.info('%s: loading %s/%s to BigQuery table %s' % (table_id, bucket_name,
                                                          obj, table_id_tmp))
     try:
-        create_bq_table(table_id_tmp)
-        load_parquet_to_bq(bucket_name, obj, table_id_tmp)
+        # create_bq_table(table_id_tmp)
+        # load_parquet_to_bq(bucket_name, obj, table_id_tmp)
         load_bq_query_to_table(query, table_id)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
