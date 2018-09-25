@@ -15,7 +15,6 @@ from thrift.transport import TTransport
 
 from parquet2bigquery.parquet_format.ttypes import (FileMetaData, Type,
                                                     FieldRepetitionType as FRT)
-from datetime import datetime
 from dateutil.parser import parse
 
 from parquet2bigquery.logs import configure_logging
@@ -26,7 +25,7 @@ from multiprocessing import Process, JoinableQueue, Lock
 log = configure_logging()
 
 # defaults
-DEFAULT_DATASET = getenv('DEFAULT_DATASET', 'tmp4')
+DEFAULT_DATASET = getenv('P2B_DEFAULT_DATASET', 'tmp4')
 
 ignore_patterns = [
     r'.*/$',  # dirs
@@ -57,6 +56,10 @@ def ignore_key(key, exclude_regex=None):
     if exclude_regex is None:
         exclude_regex = []
     return any([re.match(pat, key) for pat in ignore_patterns + exclude_regex])
+
+
+def normalize_table_id(table_name):
+    return table_name.replace("-", "").lower()
 
 
 def get_parquet_schema(bucket, key):
@@ -128,9 +131,11 @@ def bq_modes(elem):
 
 
 def bq_legacy_types(elem):
+    byte_array = getenv('P2B_BYTE_ARRAY_TYPE', 'STRING')
+
     CONVERSIONS = {
         'boolean': 'BOOLEAN',
-        'byte_array': 'STRING',
+        'byte_array': byte_array,
         'double': 'FLOAT',
         'fixed_len_byte_array': 'NUMERIC',
         'float': 'FLOAT',
@@ -347,8 +352,7 @@ def check_bq_partition_exists(table_id, date_partition, partitions=None,
     s_items = []
     part_as = "{0} = '{1}'"
 
-    date_value = str(datetime.strptime(date_partition[1],
-                                       "%Y%m%d").strftime('%Y-%m-%d'))
+    date_value = parse(date_partition[1]).strftime('%Y-%m-%d')
 
     s_items.append(part_as.format(date_partition[0], date_value))
 
@@ -463,14 +467,13 @@ def run(bucket_name, object, dir=None, lock=None, resume=False):
 
     meta = _get_object_key_metadata(object)
 
-    table_id = meta['table_id']
+    table_id = normalize_table_id(meta['table_id'])
     date_partition_field = meta['date_partition'][0]
     date_partition_value = meta['date_partition'][1]
 
-    table_id_tmp = '_'.join([meta['table_id'],
-                            date_partition_value.replace("-", ""),
-                            tmp_prefix()])
-
+    table_id_tmp = normalize_table_id('_'.join([meta['table_id'],
+                                      date_partition_value,
+                                      tmp_prefix()]))
     if resume:
         try:
             if check_bq_partition_exists(table_id, meta['date_partition'],
