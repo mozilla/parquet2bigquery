@@ -18,6 +18,11 @@ def main():
                         default=10,
                         type=int,
                         action="store")
+    parser.add_argument("-d", "--date-format",
+                        dest='dateformat',
+                        help="Date Format",
+                        default='%Y%m%d',
+                        action="store")
 
     glob_group = parser.add_mutually_exclusive_group()
 
@@ -44,7 +49,7 @@ def main():
     args = parser.parse_args()
 
     bulk(args.bucket, args.prefix, args.concurrency, args.globload,
-         args.resumeload)
+         args.resumeload, args.dateformat)
 
 
 main()

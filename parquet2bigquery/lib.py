@@ -149,19 +149,19 @@ def bq_legacy_types(elem):
     return CONVERSIONS[elem]
 
 
-def get_object_key_metadata(object):
-    o = object.split('/')
+# def get_object_key_metadata(object):
+#     o = object.split('/')
 
-    table_id = '%s_%s' % (o[0].replace('-', '_'), o[1])
+#     table_id = '%s_%s' % (o[0].replace('-', '_'), o[1])
 
-    # try to get the partition
-    _partition = o[2].split('=')
-    if len(_partition) != 2:
-        partition = None
-    else:
-        partition = _partition
+#     # try to get the partition
+#     _partition = o[2].split('=')
+#     if len(_partition) != 2:
+#         partition = None
+#     else:
+#         partition = _partition
 
-    return table_id, partition
+#     return table_id, partition
 
 
 def _get_object_key_metadata(object):
@@ -171,9 +171,10 @@ def _get_object_key_metadata(object):
     }
     o = object.split('/')
 
-    meta['table_id'] = '%s_%s' % (o[0].replace('-', '_'), o[1])
+    meta['table_id'] = normalize_table_id('_'.join([o[0], o[1]]))
 
     meta['date_partition'] = o[2].split('=')
+    meta['date_partition'][1] = parse(meta['date_partition'][1]).strftime('%Y-%m-%d')
     # try to get partition information
     for dir in o[3:]:
         if '=' in dir:
@@ -320,9 +321,7 @@ def construct_select_query(table_id, date_partition, partitions=None,
                            dataset=DEFAULT_DATASET):
     s_items = ['SELECT *']
 
-    date_value = parse(date_partition[1]).strftime('%Y-%m-%d')
-
-    s_items.append("CAST('{0}' AS DATE) as {1}".format(date_value,
+    s_items.append("CAST('{0}' AS DATE) as {1}".format(date_partition[1],
                                                        date_partition[0]))
 
     part_as = "'{1}' as {0}"
@@ -347,9 +346,7 @@ def check_bq_partition_exists(table_id, date_partition, partitions=None,
     s_items = []
     part_as = "{0} = '{1}'"
 
-    date_value = parse(date_partition[1]).strftime('%Y-%m-%d')
-
-    s_items.append(part_as.format(date_partition[0], date_value))
+    s_items.append(part_as.format(date_partition[0], date_partition[1]))
 
     for partition in partitions:
         s_items.append(part_as.format(*partition))
@@ -458,31 +455,20 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field):
             pass
 
 
-def run(bucket_name, object, dir=None, lock=None, resume=False):
+def run(bucket_name, object, dir=None, lock=None):
     if ignore_key(object):
         log.warning('Ignoring {}'.format(object))
         return
 
     meta = _get_object_key_metadata(object)
 
-    table_id = normalize_table_id(meta['table_id'])
+    table_id = meta['table_id']
     date_partition_field = meta['date_partition'][0]
     date_partition_value = meta['date_partition'][1]
 
     table_id_tmp = normalize_table_id('_'.join([meta['table_id'],
                                       date_partition_value,
                                       tmp_prefix()]))
-    if resume:
-        try:
-            if check_bq_partition_exists(table_id, meta['date_partition'],
-                                         partitions=meta['partitions']):
-                log.warning('Ignoring {}, partition '
-                            'already exists'.format(object))
-                return
-        except (google.api_core.exceptions.InternalServerError,
-                google.api_core.exceptions.ServiceUnavailable):
-            log.exception('%s: BigQuery Retryable Error' % table_id)
-            raise GCWarning('BigQuery Retryable Error')
 
     query = construct_select_query(table_id_tmp, meta['date_partition'],
                                    partitions=meta['partitions'])
@@ -556,8 +542,68 @@ def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
     return set(schema)
 
 
+def get_bq_table_partitions(table_id, date_partition, partitions=[],
+                            dataset=DEFAULT_DATASET):
+    client = bigquery.Client()
+
+    s_items = []
+    reconstruct_paths = []
+
+    s_items.append(date_partition[0])
+
+    for partition in partitions:
+        s_items.append(partition[0])
+
+    _tmp_s = ','.join(s_items)
+
+    query = """
+    SELECT {2}
+    FROM {0}.{1}
+    GROUP BY {2}
+    """.format(dataset, table_id, _tmp_s)
+    print(query)
+
+    query_job = client.query(query)
+    results = query_job.result()
+
+    for row in results:
+        tmp_path = []
+        for item in s_items:
+            tmp_path.append('{}={}'.format(item, row[item]))
+        reconstruct_paths.append('/'.join(tmp_path))
+
+    return reconstruct_paths
+
+
+def remove_loaded_objects(objects, submission_date_format):
+    initial_object_tmp = list(objects)[0]
+    print(initial_object_tmp)
+    path_prefix = initial_object_tmp.split('/')[:2]
+    meta = _get_object_key_metadata(initial_object_tmp)
+    print(meta)
+
+    object_paths = get_bq_table_partitions(meta['table_id'],
+                                           meta['date_partition'],
+                                           meta['partitions'])
+
+    for path in object_paths:
+        spath = path.split('/')
+        date_value = parse(spath[0].split('=')[1]).strftime(submission_date_format)
+        spath[0] = '='.join([meta['date_partition'][0]] + [date_value])
+        key = '/'.join(path_prefix + spath)
+        print(key)
+        try:
+            del objects[key]
+            log.info('Key already loaded into BigQuery')
+        except KeyError:
+            log.info('Including key')
+
+    return objects
+
+
 # we want to bulk load by a partition that makes sense
-def bulk(bucket_name, prefix, concurrency, glob_load, resume_load):
+def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
+         submission_date_format):
 
     q = JoinableQueue()
     lock = Lock()
@@ -565,13 +611,16 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load):
     if glob_load:
         log.info('main_process: loading via glob method')
         objects = get_latest_object(bucket_name, prefix)
+        if resume_load:
+            objects = remove_loaded_objects(objects, submission_date_format)
+
         for dir, object in objects.items():
-            q.put((bucket_name, dir, object, resume_load))
+            q.put((bucket_name, dir, object))
     else:
         log.info('main_process: loading via non-glob method')
         objects = list_blobs_with_prefix(bucket_name, prefix)
         for object in objects:
-            q.put((bucket_name, None, object, resume_load))
+            q.put((bucket_name, None, object))
 
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c, lock, q,))
@@ -592,11 +641,11 @@ def _bulk_run(process_id, lock, q):
     log.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
-        bucket_name, dir, object, resume_load = item
+        bucket_name, dir, object = item
         try:
             o = object if dir is None else dir
             log.info('Process-{}: running {}'.format(process_id, o))
-            run(bucket_name, object, dir=dir, lock=lock, resume=resume_load)
+            run(bucket_name, object, dir=dir, lock=lock)
         except GCWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {}'
