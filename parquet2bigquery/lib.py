@@ -83,7 +83,7 @@ def ignore_key(key, exclude_regex=None):
 
 
 def normalize_table_id(table_name):
-    return table_name.replace("-", "").lower()
+    return table_name.replace("-", "_").lower()
 
 
 def get_parquet_schema(bucket, key):
