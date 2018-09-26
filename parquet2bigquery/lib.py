@@ -604,6 +604,9 @@ def remove_loaded_objects(objects):
     path_prefix = initial_object_tmp.split('/')[:2]
     meta = _get_object_key_metadata(initial_object_tmp)
 
+    if not check_bq_table_exists(meta['table_id']):
+        return objects
+
     object_paths = get_bq_table_partitions(meta['table_id'],
                                            meta['date_partition'],
                                            meta['partitions'])
