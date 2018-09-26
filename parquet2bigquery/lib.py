@@ -16,6 +16,7 @@ from thrift.transport import TTransport
 from parquet2bigquery.parquet_format.ttypes import (FileMetaData, Type,
                                                     FieldRepetitionType as FRT)
 from dateutil.parser import parse
+from datetime import datetime
 
 from parquet2bigquery.logs import configure_logging
 
@@ -35,6 +36,10 @@ ignore_patterns = [
 ]
 
 
+# class ProcessingError(Exception):
+#     exit()
+
+
 class ParquetFormatError(Exception):
     pass
 
@@ -45,6 +50,25 @@ class GCError(Exception):
 
 class GCWarning(Exception):
     pass
+
+
+def get_date_format(date):
+
+    date_formats = [
+        '%Y%m%d',
+        '%Y-%m-%d'
+     ]
+
+    for format in date_formats:
+        try:
+            datetime.strptime(date, format)
+            log.info("date format {} detected".format(format))
+            return format
+        except ValueError:
+            continue
+
+    log.error('Date format not detected, exit')
+    # raise ProcessingError('date format could not be determined')
 
 
 def tmp_prefix(size=5):
@@ -174,6 +198,7 @@ def _get_object_key_metadata(object):
     meta['table_id'] = normalize_table_id('_'.join([o[0], o[1]]))
 
     meta['date_partition'] = o[2].split('=')
+    meta['date_format'] = get_date_format(meta['date_partition'][1])
     meta['date_partition'][1] = parse(meta['date_partition'][1]).strftime('%Y-%m-%d')
     # try to get partition information
     for dir in o[3:]:
@@ -561,7 +586,6 @@ def get_bq_table_partitions(table_id, date_partition, partitions=[],
     FROM {0}.{1}
     GROUP BY {2}
     """.format(dataset, table_id, _tmp_s)
-    print(query)
 
     query_job = client.query(query)
     results = query_job.result()
@@ -575,12 +599,10 @@ def get_bq_table_partitions(table_id, date_partition, partitions=[],
     return reconstruct_paths
 
 
-def remove_loaded_objects(objects, submission_date_format):
+def remove_loaded_objects(objects):
     initial_object_tmp = list(objects)[0]
-    print(initial_object_tmp)
     path_prefix = initial_object_tmp.split('/')[:2]
     meta = _get_object_key_metadata(initial_object_tmp)
-    print(meta)
 
     object_paths = get_bq_table_partitions(meta['table_id'],
                                            meta['date_partition'],
@@ -588,22 +610,20 @@ def remove_loaded_objects(objects, submission_date_format):
 
     for path in object_paths:
         spath = path.split('/')
-        date_value = parse(spath[0].split('=')[1]).strftime(submission_date_format)
+        date_value = parse(spath[0].split('=')[1]).strftime(meta['date_format'])
         spath[0] = '='.join([meta['date_partition'][0]] + [date_value])
         key = '/'.join(path_prefix + spath)
-        print(key)
         try:
             del objects[key]
-            log.info('Key already loaded into BigQuery')
+            log.debug('key {} already loaded into BigQuery'.format(key))
         except KeyError:
-            log.info('Including key')
+            continue
 
     return objects
 
 
 # we want to bulk load by a partition that makes sense
-def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
-         submission_date_format):
+def bulk(bucket_name, prefix, concurrency, glob_load, resume_load):
 
     q = JoinableQueue()
     lock = Lock()
@@ -612,7 +632,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         log.info('main_process: loading via glob method')
         objects = get_latest_object(bucket_name, prefix)
         if resume_load:
-            objects = remove_loaded_objects(objects, submission_date_format)
+            objects = remove_loaded_objects(objects)
 
         for dir, object in objects.items():
             q.put((bucket_name, dir, object))
