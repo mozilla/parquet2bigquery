@@ -247,10 +247,10 @@ def update_bq_table_schema(table_id, schema_additions,
 
 
 def generate_bq_schema(table_id, date_partition_field=None,
-                       partitions=None):
+                       partitions=None, dataset=DEFAULT_DATASET):
     p_fields = []
 
-    schema = get_bq_table_schema(table_id)
+    schema = get_bq_table_schema(table_id, dataset=dataset)
 
     if date_partition_field:
         p_fields.append(bigquery.SchemaField(date_partition_field, 'DATE',
@@ -505,7 +505,8 @@ def run(bucket_name, object, dir=None, lock=None):
     try:
         new_schema = generate_bq_schema(table_id_tmp,
                                         date_partition_field,
-                                        meta['partitions'])
+                                        meta['partitions'],
+                                        dataset=DEFAULT_TMP_DATASET)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         log.exception('%s: GCS Retryable Error' % table_id)
