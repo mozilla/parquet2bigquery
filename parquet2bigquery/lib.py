@@ -26,7 +26,8 @@ from multiprocessing import Process, JoinableQueue, Lock
 log = configure_logging()
 
 # defaults
-DEFAULT_DATASET = getenv('P2B_DEFAULT_DATASET', 'tmp4')
+DEFAULT_DATASET = getenv('P2B_DEFAULT_DATASET', 'telemetry')
+DEFAULT_TMP_DATASET = getenv('P2B_DEFAULT_TMP_DATASET', 'tmp')
 
 ignore_patterns = [
     r'.*/$',  # dirs
@@ -34,10 +35,6 @@ ignore_patterns = [
     r'.*/_[^/]*$',  # temp files
     r'.*/[^/]*\$folder\$/?'  # metadata dirs and files
 ]
-
-
-# class ProcessingError(Exception):
-#     exit()
 
 
 class ParquetFormatError(Exception):
@@ -172,20 +169,6 @@ def bq_legacy_types(elem):
 
     return CONVERSIONS[elem]
 
-
-# def get_object_key_metadata(object):
-#     o = object.split('/')
-
-#     table_id = '%s_%s' % (o[0].replace('-', '_'), o[1])
-
-#     # try to get the partition
-#     _partition = o[2].split('=')
-#     if len(_partition) != 2:
-#         partition = None
-#     else:
-#         partition = _partition
-
-#     return table_id, partition
 
 
 def _get_object_key_metadata(object):
@@ -343,7 +326,7 @@ def get_schema_diff(schema1, schema2):
 
 
 def construct_select_query(table_id, date_partition, partitions=None,
-                           dataset=DEFAULT_DATASET):
+                           dataset=DEFAULT_TMP_DATASET):
     s_items = ['SELECT *']
 
     s_items.append("CAST('{0}' AS DATE) as {1}".format(date_partition[1],
@@ -424,7 +407,7 @@ def check_bq_table_exists(table_id, dataset=DEFAULT_DATASET):
         return False
 
 
-def delete_bq_table(table_id, dataset=DEFAULT_DATASET):
+def delete_bq_table(table_id, dataset=DEFAULT_TMP_DATASET):
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
     table_ref = dataset_ref.table(table_id)
@@ -509,11 +492,12 @@ def run(bucket_name, object, dir=None, lock=None):
 
     # we want to create the temp table and load the data
     try:
-        create_bq_table(table_id_tmp)
-        load_parquet_to_bq(bucket_name, obj, table_id_tmp)
+        create_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
+        load_parquet_to_bq(bucket_name, obj, table_id_tmp,
+                           dataset=DEFAULT_TMP_DATASET)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
-        delete_bq_table(table_id_tmp)
+        delete_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
         log.exception('%s: BigQuery Retryable Error' % table_id)
         raise GCWarning('BigQuery Retryable Error')
 
