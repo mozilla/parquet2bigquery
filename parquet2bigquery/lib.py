@@ -611,7 +611,12 @@ def remove_loaded_objects(objects):
 
 
 # we want to bulk load by a partition that makes sense
-def bulk(bucket_name, prefix, concurrency, glob_load, resume_load):
+def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
+         dest_dataset=None):
+
+    if dest_dataset:
+        global DEFAULT_DATASET
+        DEFAULT_DATASET = dest_dataset
 
     q = JoinableQueue()
     lock = Lock()

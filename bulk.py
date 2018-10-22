@@ -13,6 +13,10 @@ def main():
                         help="Object Prefix",
                         action="store", required=True)
 
+    parser.add_argument("-d", "--dataset",
+                        help="BigQuery Destination Dataset",
+                        action="store", required=False)
+
     parser.add_argument("-c", "--concurrency",
                         help="Process concurrency",
                         default=10,
@@ -44,7 +48,7 @@ def main():
     args = parser.parse_args()
 
     bulk(args.bucket, args.prefix, args.concurrency, args.globload,
-         args.resumeload)
+         args.resumeload, dest_dataset=args.dataset)
 
 
 main()
