@@ -33,7 +33,8 @@ ignore_patterns = [
     r'.*/$',  # dirs
     r'.*/_[^=/]*/',  # temp dirs
     r'.*/_[^/]*$',  # temp files
-    r'.*/[^/]*\$folder\$/?'  # metadata dirs and files
+    r'.*/[^/]*\$folder\$/?',   # metadata dirs and files
+    r'.*\/.spark-staging.*$', # spark staging dirs
 ]
 
 
@@ -349,6 +350,9 @@ def construct_select_query(table_id, date_partition, partitions=None,
 def check_bq_partition_exists(table_id, date_partition, partitions=None,
                               dataset=DEFAULT_DATASET):
     client = bigquery.Client()
+    job_config = bigquery.QueryJobConfig()
+    job_config.use_query_cache = False
+
 
     count = 0
     s_items = []
@@ -368,7 +372,7 @@ def check_bq_partition_exists(table_id, date_partition, partitions=None,
     LIMIT 10
     """.format(dataset, table_id, _tmp_s)
 
-    query_job = client.query(query)
+    query_job = client.query(query, job_config=job_config)
     results = query_job.result()
     for row in results:
         count += 1
