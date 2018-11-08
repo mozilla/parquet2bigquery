@@ -1,5 +1,4 @@
 import google.api_core.exceptions
-import struct
 import random
 import string
 import re
@@ -7,14 +6,8 @@ import re
 from google.cloud import storage
 from google.cloud import bigquery
 
-from io import BytesIO
 from os import getenv
 
-from thrift.protocol import TCompactProtocol
-from thrift.transport import TTransport
-
-from parquet2bigquery.parquet_format.ttypes import (FileMetaData, Type,
-                                                    FieldRepetitionType as FRT)
 from dateutil.parser import parse
 from datetime import datetime
 
@@ -33,8 +26,8 @@ ignore_patterns = [
     r'.*/$',  # dirs
     r'.*/_[^=/]*/',  # temp dirs
     r'.*/_[^/]*$',  # temp files
-    r'.*/[^/]*\$folder\$/?',   # metadata dirs and files
-    r'.*\/.spark-staging.*$', # spark staging dirs
+    r'.*/[^/]*\$folder\$/?',  # metadata dirs and files
+    r'.*\/.spark-staging.*$',  # spark staging dirs
 ]
 
 
@@ -84,64 +77,6 @@ def normalize_table_id(table_name):
     return table_name.replace("-", "_").lower()
 
 
-def get_parquet_schema(bucket, key):
-    storage_client = storage.Client()
-    b = storage_client.bucket(bucket)
-    blob = b.get_blob(key)
-    object_size = blob.size
-
-    with BytesIO() as f:
-        blob.download_to_file(f, start=(object_size - 8))
-        f.seek(0)
-
-        # get footer size
-        footer_size = struct.unpack('<i', f.read(4))[0]
-        magic_number = f.read(4)
-
-    # raise error if magic number is bad
-    if magic_number != b'PAR1':
-        log.error('magic number is invalid')
-        raise ParquetFormatError('magic number is invalid')
-
-    with BytesIO() as footer:
-        blob.download_to_file(footer, start=object_size-8-footer_size)
-        footer.seek(0)
-
-        transport = TTransport.TFileObjectTransport(footer)
-        protocol = TCompactProtocol.TCompactProtocol(transport)
-        metadata = FileMetaData()
-        metadata.read(protocol)
-
-    return metadata.schema
-
-
-def build_tree(schema, children):
-    retval = []
-
-    for _ in range(children):
-        elem = schema.pop(0)
-
-        elem_type = ('group' if elem.type is None
-                     else Type._VALUES_TO_NAMES[elem.type].lower())
-        repetition_type = FRT._VALUES_TO_NAMES[elem.repetition_type].lower()
-
-        leaf = {
-            'name': elem.name,
-            'type': bq_legacy_types(elem_type),
-            'mode': bq_modes(repetition_type),
-        }
-
-        if elem_type == 'group':
-            children = build_tree(schema, elem.num_children)
-            leaf['fields'] = children
-        else:
-            children = None
-
-        retval.append(leaf)
-
-    return retval
-
-
 def bq_modes(elem):
     REP_CONVERSIONS = {
             'required': 'REQUIRED',
@@ -169,7 +104,6 @@ def bq_legacy_types(elem):
     }
 
     return CONVERSIONS[elem]
-
 
 
 def _get_object_key_metadata(object):
