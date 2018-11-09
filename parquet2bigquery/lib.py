@@ -6,8 +6,6 @@ import re
 from google.cloud import storage
 from google.cloud import bigquery
 
-from os import getenv
-
 from dateutil.parser import parse
 from datetime import datetime
 
@@ -19,8 +17,8 @@ from multiprocessing import Process, JoinableQueue, Lock
 log = configure_logging()
 
 # defaults
-DEFAULT_DATASET = getenv('P2B_DEFAULT_DATASET', 'telemetry')
-DEFAULT_TMP_DATASET = getenv('P2B_DEFAULT_TMP_DATASET', 'tmp')
+DEFAULT_DATASET = 'telemetry'
+DEFAULT_TMP_DATASET = 'tmp'
 
 ignore_patterns = [
     r'.*/$',  # dirs
@@ -130,8 +128,7 @@ def get_partitioning_fields(prefix):
     return re.findall("([^=/]+)=[^=/]+", prefix)
 
 
-def create_bq_table(table_id, schema=None, partition_field=None,
-                    dataset=DEFAULT_DATASET):
+def create_bq_table(table_id, dataset, schema=None, partition_field=None):
 
     from google.cloud.bigquery.table import TimePartitioning
     from google.cloud.bigquery.table import TimePartitioningType
@@ -152,7 +149,7 @@ def create_bq_table(table_id, schema=None, partition_field=None,
     log.info('%s: table created.' % table_id)
 
 
-def get_bq_table_schema(table_id, dataset=DEFAULT_DATASET):
+def get_bq_table_schema(table_id, dataset):
 
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
@@ -163,8 +160,7 @@ def get_bq_table_schema(table_id, dataset=DEFAULT_DATASET):
     return table.schema
 
 
-def update_bq_table_schema(table_id, schema_additions,
-                           dataset=DEFAULT_DATASET):
+def update_bq_table_schema(table_id, schema_additions, dataset):
 
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
@@ -181,11 +177,11 @@ def update_bq_table_schema(table_id, schema_additions,
     log.info('%s: BigQuery table schema updated.' % table_id)
 
 
-def generate_bq_schema(table_id, date_partition_field=None,
-                       partitions=None, dataset=DEFAULT_DATASET):
+def generate_bq_schema(table_id, dataset, date_partition_field=None,
+                       partitions=None):
     p_fields = []
 
-    schema = get_bq_table_schema(table_id, dataset=dataset)
+    schema = get_bq_table_schema(table_id, dataset)
 
     if date_partition_field:
         p_fields.append(bigquery.SchemaField(date_partition_field, 'DATE',
@@ -198,8 +194,8 @@ def generate_bq_schema(table_id, date_partition_field=None,
     return p_fields + schema
 
 
-def load_parquet_to_bq(bucket, object, table_id, schema=None,
-                       partition=None, dataset=DEFAULT_DATASET):
+def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
+                       partition=None):
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
     job_config = bigquery.LoadJobConfig()
@@ -281,12 +277,11 @@ def construct_select_query(table_id, date_partition, partitions=None,
     return query
 
 
-def check_bq_partition_exists(table_id, date_partition, partitions=None,
-                              dataset=DEFAULT_DATASET):
+def check_bq_partition_exists(table_id, date_partition, dataset,
+                              partitions=None):
     client = bigquery.Client()
     job_config = bigquery.QueryJobConfig()
     job_config.use_query_cache = False
-
 
     count = 0
     s_items = []
@@ -317,8 +312,7 @@ def check_bq_partition_exists(table_id, date_partition, partitions=None,
         return True
 
 
-def load_bq_query_to_table(query, table_id,
-                           dataset=DEFAULT_DATASET):
+def load_bq_query_to_table(query, table_id, dataset):
     job_config = bigquery.QueryJobConfig()
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
@@ -331,7 +325,7 @@ def load_bq_query_to_table(query, table_id,
     log.info('{}: query results loaded'.format(table_id))
 
 
-def check_bq_table_exists(table_id, dataset=DEFAULT_DATASET):
+def check_bq_table_exists(table_id, dataset):
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
     table_ref = dataset_ref.table(table_id)
@@ -392,16 +386,18 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
     return latest_objects
 
 
-def create_primary_bq_table(table_id, new_schema, date_partition_field):
+def create_primary_bq_table(table_id, new_schema, date_partition_field,
+                            dataset):
     # check to see if the table exists if not create it
-    if not check_bq_table_exists(table_id):
+    if not check_bq_table_exists(table_id, dataset):
         try:
-            create_bq_table(table_id, new_schema, date_partition_field)
+            create_bq_table(table_id, dataset, new_schema,
+                            date_partition_field)
         except google.api_core.exceptions.Conflict:
             pass
 
 
-def run(bucket_name, object, dir=None, lock=None):
+def run(bucket_name, object, dest_dataset, dir=None, lock=None):
     if ignore_key(object):
         log.warning('Ignoring {}'.format(object))
         return
@@ -430,9 +426,9 @@ def run(bucket_name, object, dir=None, lock=None):
 
     # we want to create the temp table and load the data
     try:
-        create_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
+        create_bq_table(table_id_tmp, DEFAULT_TMP_DATASET)
         load_parquet_to_bq(bucket_name, obj, table_id_tmp,
-                           dataset=DEFAULT_TMP_DATASET)
+                           DEFAULT_TMP_DATASET)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         delete_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
@@ -442,9 +438,9 @@ def run(bucket_name, object, dir=None, lock=None):
     # data is now loaded, we want to grab the schema of the table
     try:
         new_schema = generate_bq_schema(table_id_tmp,
+                                        DEFAULT_TMP_DATASET,
                                         date_partition_field,
-                                        meta['partitions'],
-                                        dataset=DEFAULT_TMP_DATASET)
+                                        meta['partitions'])
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         log.exception('%s: GCS Retryable Error' % table_id)
@@ -453,24 +449,24 @@ def run(bucket_name, object, dir=None, lock=None):
     if lock:
         lock.acquire()
         try:
-            create_primary_bq_table(table_id, new_schema, date_partition_field)
+            create_primary_bq_table(table_id, new_schema,
+                                    date_partition_field, dest_dataset)
         finally:
             lock.release()
     else:
-        create_primary_bq_table(table_id, new_schema, date_partition_field)
+        create_primary_bq_table(table_id, new_schema,
+                                date_partition_field, dest_dataset)
 
-    current_schema = get_bq_table_schema(table_id)
+    current_schema = get_bq_table_schema(table_id, dest_dataset)
     schema_additions = get_schema_diff(current_schema, new_schema)
 
     if len(schema_additions) > 0:
-        update_bq_table_schema(table_id, schema_additions)
+        update_bq_table_schema(table_id, schema_additions, dest_dataset)
 
     log.info('%s: loading %s/%s to BigQuery table %s' % (table_id, bucket_name,
                                                          obj, table_id_tmp))
     try:
-        # create_bq_table(table_id_tmp)
-        # load_parquet_to_bq(bucket_name, obj, table_id_tmp)
-        load_bq_query_to_table(query, table_id)
+        load_bq_query_to_table(query, table_id, dest_dataset)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         log.exception('%s: BigQuery Retryable Error' % table_id)
@@ -479,19 +475,7 @@ def run(bucket_name, object, dir=None, lock=None):
         delete_bq_table(table_id_tmp)
 
 
-def generate_bulk_bq_schema(bucket_name, objects, date_partition_field=None,
-                            partitions=None):
-
-    schema = []
-    for object in objects:
-        schema += generate_bq_schema(bucket_name, object,
-                                     date_partition_field, partitions)
-
-    return set(schema)
-
-
-def get_bq_table_partitions(table_id, date_partition, partitions=[],
-                            dataset=DEFAULT_DATASET):
+def get_bq_table_partitions(table_id, date_partition, dataset, partitions=[]):
     client = bigquery.Client()
 
     s_items = []
@@ -522,16 +506,17 @@ def get_bq_table_partitions(table_id, date_partition, partitions=[],
     return reconstruct_paths
 
 
-def remove_loaded_objects(objects):
+def remove_loaded_objects(objects, dataset):
     initial_object_tmp = list(objects)[0]
     path_prefix = initial_object_tmp.split('/')[:2]
     meta = _get_object_key_metadata(initial_object_tmp)
 
-    if not check_bq_table_exists(meta['table_id']):
+    if not check_bq_table_exists(meta['table_id'], dataset):
         return objects
 
     object_paths = get_bq_table_partitions(meta['table_id'],
                                            meta['date_partition'],
+                                           dataset,
                                            meta['partitions'])
 
     for path in object_paths:
@@ -553,10 +538,11 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
          dest_dataset=None):
 
     if dest_dataset:
-        global DEFAULT_DATASET
-        DEFAULT_DATASET = dest_dataset
+        _dest_dataset = dest_dataset
+    else:
+        _dest_dataset = DEFAULT_DATASET
 
-    log.info('main_process: dataset set to {}'.format(DEFAULT_DATASET))
+    log.info('main_process: dataset set to {}'.format(_dest_dataset))
 
     q = JoinableQueue()
     lock = Lock()
@@ -565,7 +551,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         log.info('main_process: loading via glob method')
         objects = get_latest_object(bucket_name, prefix)
         if resume_load:
-            objects = remove_loaded_objects(objects)
+            objects = remove_loaded_objects(objects, _dest_dataset)
 
         for dir, object in objects.items():
             q.put((bucket_name, dir, object))
@@ -576,7 +562,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
             q.put((bucket_name, None, object))
 
     for c in range(concurrency):
-        p = Process(target=_bulk_run, args=(c, lock, q, DEFAULT_DATASET,))
+        p = Process(target=_bulk_run, args=(c, lock, q, _dest_dataset,))
         p.daemon = True
         p.start()
 
@@ -593,17 +579,13 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
 def _bulk_run(process_id, lock, q, dest_dataset):
     log.info('Process-{}: started'.format(process_id))
 
-    global DEFAULT_DATASET
-    DEFAULT_DATASET = dest_dataset
-
-    log.info('Process-{}: dataset set to {}'.format(process_id, dest_dataset))
-
     for item in iter(q.get, None):
         bucket_name, dir, object = item
         try:
             o = object if dir is None else dir
             log.info('Process-{}: running {}'.format(process_id, o))
-            run(bucket_name, object, dir=dir, lock=lock)
+            run(bucket_name, object, dest_dataset, dir=dir,
+                lock=lock)
         except GCWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {}'
