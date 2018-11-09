@@ -556,6 +556,8 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         global DEFAULT_DATASET
         DEFAULT_DATASET = dest_dataset
 
+    log.info('main_process: dataset set to {}'.format(DEFAULT_DATASET))
+
     q = JoinableQueue()
     lock = Lock()
 
@@ -574,7 +576,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
             q.put((bucket_name, None, object))
 
     for c in range(concurrency):
-        p = Process(target=_bulk_run, args=(c, lock, q,))
+        p = Process(target=_bulk_run, args=(c, lock, q, DEFAULT_DATASET,))
         p.daemon = True
         p.start()
 
@@ -588,8 +590,13 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     log.info('main_process: done')
 
 
-def _bulk_run(process_id, lock, q):
+def _bulk_run(process_id, lock, q, dest_dataset):
     log.info('Process-{}: started'.format(process_id))
+
+    global DEFAULT_DATASET
+    DEFAULT_DATASET = dest_dataset
+
+    log.info('Process-{}: dataset set to {}'.format(process_id, dest_dataset))
 
     for item in iter(q.get, None):
         bucket_name, dir, object = item
