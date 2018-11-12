@@ -104,7 +104,7 @@ def bq_legacy_types(elem):
     return CONVERSIONS[elem]
 
 
-def _get_object_key_metadata(object):
+def _get_object_key_metadata(object, prefix):
 
     meta = {
         'partitions': []
@@ -397,14 +397,17 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field,
             pass
 
 
-def run(bucket_name, object, dest_dataset, dir=None, lock=None):
+def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     if ignore_key(object):
         log.warning('Ignoring {}'.format(object))
         return
 
     meta = _get_object_key_metadata(object)
 
-    table_id = meta['table_id']
+    if alias:
+        table_id = alias
+    else:
+        table_id = meta['table_id']
     date_partition_field = meta['date_partition'][0]
     date_partition_value = meta['date_partition'][1]
 
@@ -535,7 +538,7 @@ def remove_loaded_objects(objects, dataset):
 
 # we want to bulk load by a partition that makes sense
 def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
-         dest_dataset=None):
+         dest_dataset=None, alias=None):
 
     if dest_dataset:
         _dest_dataset = dest_dataset
@@ -562,7 +565,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
             q.put((bucket_name, None, object))
 
     for c in range(concurrency):
-        p = Process(target=_bulk_run, args=(c, lock, q, _dest_dataset,))
+        p = Process(target=_bulk_run, args=(c, lock, q, _dest_dataset, alias,))
         p.daemon = True
         p.start()
 
@@ -576,7 +579,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     log.info('main_process: done')
 
 
-def _bulk_run(process_id, lock, q, dest_dataset):
+def _bulk_run(process_id, lock, q, dest_dataset, alias):
     log.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
@@ -585,7 +588,7 @@ def _bulk_run(process_id, lock, q, dest_dataset):
             o = object if dir is None else dir
             log.info('Process-{}: running {}'.format(process_id, o))
             run(bucket_name, object, dest_dataset, dir=dir,
-                lock=lock)
+                lock=lock, alias=alias)
         except GCWarning:
             q.put(item)
             log.warn('Process-{}: Re-queueed {}'

@@ -17,6 +17,10 @@ def main():
                         help="BigQuery Destination Dataset",
                         action="store", required=False)
 
+    parser.add_argument("-a", "--alias",
+                        help="BigQuery Table Alias",
+                        action="store", required=False)
+
     parser.add_argument("-c", "--concurrency",
                         help="Process concurrency",
                         default=10,
@@ -48,7 +52,7 @@ def main():
     args = parser.parse_args()
 
     bulk(args.bucket, args.prefix, args.concurrency, args.globload,
-         args.resumeload, dest_dataset=args.dataset)
+         args.resumeload, dest_dataset=args.dataset, alias=args.alias)
 
 
 main()
