@@ -104,20 +104,34 @@ def bq_legacy_types(elem):
     return CONVERSIONS[elem]
 
 
-def _get_object_key_metadata(object, prefix):
+def _get_object_key_metadata(object):
 
     meta = {
         'partitions': []
     }
     o = object.split('/')
 
-    meta['table_id'] = normalize_table_id('_'.join([o[0], o[1]]))
+    p_elems_idx = []
+    for elem in o:
+        if '=' in elem:
+            p_elems_idx.append(o.index(elem))
 
-    meta['date_partition'] = o[2].split('=')
+    first_part_idx = min(p_elems_idx)
+
+    table_version = o[first_part_idx - 1]
+    table_name = o[first_part_idx - 2]
+
+    meta['first_part_idx'] = first_part_idx
+
+    meta['table_id'] = normalize_table_id('_'.join([table_name,
+                                                    table_version]))
+
+    meta['date_partition'] = o[first_part_idx].split('=')
     meta['date_format'] = get_date_format(meta['date_partition'][1])
     meta['date_partition'][1] = parse(meta['date_partition'][1]).strftime('%Y-%m-%d')
+
     # try to get partition information
-    for dir in o[3:]:
+    for dir in o[first_part_idx+1:]:
         if '=' in dir:
             meta['partitions'].append(dir.split('='))
 
@@ -509,15 +523,20 @@ def get_bq_table_partitions(table_id, date_partition, dataset, partitions=[]):
     return reconstruct_paths
 
 
-def remove_loaded_objects(objects, dataset):
+def remove_loaded_objects(objects, dataset, alias):
     initial_object_tmp = list(objects)[0]
-    path_prefix = initial_object_tmp.split('/')[:2]
     meta = _get_object_key_metadata(initial_object_tmp)
+    path_prefix = initial_object_tmp.split('/')[:meta['first_part_idx']]
 
-    if not check_bq_table_exists(meta['table_id'], dataset):
+    if alias:
+        table_id = alias
+    else:
+        table_id = meta['table_id']
+
+    if not check_bq_table_exists(table_id, dataset):
         return objects
 
-    object_paths = get_bq_table_partitions(meta['table_id'],
+    object_paths = get_bq_table_partitions(table_id,
                                            meta['date_partition'],
                                            dataset,
                                            meta['partitions'])
@@ -554,7 +573,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         log.info('main_process: loading via glob method')
         objects = get_latest_object(bucket_name, prefix)
         if resume_load:
-            objects = remove_loaded_objects(objects, _dest_dataset)
+            objects = remove_loaded_objects(objects, _dest_dataset, alias)
 
         for dir, object in objects.items():
             q.put((bucket_name, dir, object))
