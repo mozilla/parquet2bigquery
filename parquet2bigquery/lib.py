@@ -5,6 +5,8 @@ import re
 
 from google.cloud import storage
 from google.cloud import bigquery
+from google.cloud.bigquery.table import TimePartitioning
+from google.cloud.bigquery.table import TimePartitioningType
 
 from dateutil.parser import parse
 from datetime import datetime
@@ -29,16 +31,16 @@ ignore_patterns = [
 ]
 
 
-class ParquetFormatError(Exception):
-    pass
-
-
-class GCError(Exception):
-    pass
-
-
 class GCWarning(Exception):
     pass
+
+
+def get_bq_client(table_id, dataset):
+    client = bigquery.Client()
+    dataset_ref = client.dataset(dataset)
+    table_ref = dataset_ref.table(table_id)
+
+    return client, table_ref
 
 
 def get_date_format(date):
@@ -57,7 +59,6 @@ def get_date_format(date):
             continue
 
     log.error('Date format not detected, exit')
-    # raise ProcessingError('date format could not be determined')
 
 
 def tmp_prefix(size=5):
@@ -73,35 +74,6 @@ def ignore_key(key, exclude_regex=None):
 
 def normalize_table_id(table_name):
     return table_name.replace("-", "_").lower()
-
-
-def bq_modes(elem):
-    REP_CONVERSIONS = {
-            'required': 'REQUIRED',
-            'optional': 'NULLABLE',
-            'repeated': 'REPEATED',
-
-    }
-    return REP_CONVERSIONS[elem]
-
-
-def bq_legacy_types(elem):
-
-    CONVERSIONS = {
-        'boolean': 'BOOLEAN',
-        'byte_array': 'STRING',
-        'double': 'FLOAT',
-        'fixed_len_byte_array': 'NUMERIC',
-        'float': 'FLOAT',
-        'group': 'RECORD',
-        'int32': 'INTEGER',
-        'int64': 'INTEGER',
-        'int96': 'TIMESTAMP',
-        'list': 'RECORD',
-        'map': 'RECORD',
-    }
-
-    return CONVERSIONS[elem]
 
 
 def _get_object_key_metadata(object):
@@ -144,12 +116,7 @@ def get_partitioning_fields(prefix):
 
 def create_bq_table(table_id, dataset, schema=None, partition_field=None):
 
-    from google.cloud.bigquery.table import TimePartitioning
-    from google.cloud.bigquery.table import TimePartitioningType
-
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
-    table_ref = dataset_ref.table(table_id)
+    client, table_ref = get_bq_client(table_id, dataset)
     table = bigquery.Table(table_ref, schema=schema)
 
     if partition_field:
@@ -165,9 +132,7 @@ def create_bq_table(table_id, dataset, schema=None, partition_field=None):
 
 def get_bq_table_schema(table_id, dataset):
 
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
-    table_ref = dataset_ref.table(table_id)
+    client, table_ref = get_bq_client(table_id, dataset)
 
     table = client.get_table(table_ref)
 
@@ -176,9 +141,7 @@ def get_bq_table_schema(table_id, dataset):
 
 def update_bq_table_schema(table_id, schema_additions, dataset):
 
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
-    table_ref = dataset_ref.table(table_id)
+    client, table_ref = get_bq_client(table_id, dataset)
 
     table = client.get_table(table_ref)
     new_schema = table.schema[:]
@@ -210,8 +173,8 @@ def generate_bq_schema(table_id, dataset, date_partition_field=None,
 
 def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
                        partition=None):
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
+    client, table_ref = get_bq_client(table_id, dataset)
+
     job_config = bigquery.LoadJobConfig()
     job_config.source_format = bigquery.SourceFormat.PARQUET
     if schema:
@@ -228,7 +191,7 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
 
     load_job = client.load_table_from_uri(
         uri,
-        dataset_ref.table(table_id),
+        table_ref,
         job_config=job_config)
     assert load_job.job_type == 'load'
     load_job.result()
@@ -293,7 +256,8 @@ def construct_select_query(table_id, date_partition, partitions=None,
 
 def check_bq_partition_exists(table_id, date_partition, dataset,
                               partitions=None):
-    client = bigquery.Client()
+    client, table_ref = get_bq_client(table_id, dataset)
+
     job_config = bigquery.QueryJobConfig()
     job_config.use_query_cache = False
 
@@ -328,9 +292,8 @@ def check_bq_partition_exists(table_id, date_partition, dataset,
 
 def load_bq_query_to_table(query, table_id, dataset):
     job_config = bigquery.QueryJobConfig()
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
-    table_ref = dataset_ref.table(table_id)
+    client, table_ref = get_bq_client(table_id, dataset)
+
     job_config.destination = table_ref
     job_config.write_disposition = bigquery.job.WriteDisposition.WRITE_APPEND
 
@@ -340,9 +303,8 @@ def load_bq_query_to_table(query, table_id, dataset):
 
 
 def check_bq_table_exists(table_id, dataset):
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
-    table_ref = dataset_ref.table(table_id)
+    client, table_ref = get_bq_client(table_id, dataset)
+
     try:
         table = client.get_table(table_ref)
         if table:
@@ -354,9 +316,8 @@ def check_bq_table_exists(table_id, dataset):
 
 
 def delete_bq_table(table_id, dataset=DEFAULT_TMP_DATASET):
-    client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
-    table_ref = dataset_ref.table(table_id)
+    client, table_ref = get_bq_client(table_id, dataset)
+
     try:
         client.delete_table(table_ref)
         log.info('{}: table deleted.'.format(table_id))
@@ -493,7 +454,7 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
 
 
 def get_bq_table_partitions(table_id, date_partition, dataset, partitions=[]):
-    client = bigquery.Client()
+    client, table_ref = get_bq_client(table_id, dataset)
 
     s_items = []
     reconstruct_paths = []
