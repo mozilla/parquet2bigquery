@@ -652,6 +652,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     for c in range(concurrency):
         q.put(None)
 
+    p.join()
     log.info('main_process: done')
 
 
