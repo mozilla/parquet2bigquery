@@ -52,11 +52,11 @@ def get_date_format(date):
         '%Y-%m-%d'
      ]
 
-    for format in date_formats:
+    for date_format in date_formats:
         try:
-            datetime.strptime(date, format)
-            log.info("date format {} detected".format(format))
-            return format
+            datetime.strptime(date, date_format)
+            log.info("date format {} detected".format(date_format))
+            return date_format
         except ValueError:
             continue
 
