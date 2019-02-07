@@ -22,12 +22,12 @@ log = configure_logging()
 DEFAULT_DATASET = 'telemetry'
 DEFAULT_TMP_DATASET = 'tmp'
 
-ignore_patterns = [
+IGNORE_PATTERNS = [
     r'.*/$',  # dirs
     r'.*/_[^=/]*/',  # temp dirs
     r'.*/_[^/]*$',  # temp files
     r'.*/[^/]*\$folder\$/?',  # metadata dirs and files
-    r'.*\/.spark-staging.*$',  # spark staging dirs
+    r'.*/\.spark-staging.*$',  # spark staging dirs
 ]
 
 
@@ -74,11 +74,11 @@ def gen_rand_string(size=5):
 
 def ignore_key(key, exclude_regex=None):
     """
-        Ignore a string based on ignore_patterns.
+        Ignore a string based on IGNORE_PATTERNS.
     """
     if exclude_regex is None:
         exclude_regex = []
-    return any([re.match(pat, key) for pat in ignore_patterns + exclude_regex])
+    return any([re.match(pat, key) for pat in IGNORE_PATTERNS + exclude_regex])
 
 
 def normalize_table_id(table_name):
