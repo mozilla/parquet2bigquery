@@ -1,7 +1,8 @@
 import google.api_core.exceptions
+import logging
 import random
-import string
 import re
+import string
 
 from google.cloud import storage
 from google.cloud import bigquery
@@ -11,12 +12,11 @@ from google.cloud.bigquery.table import TimePartitioningType
 from dateutil.parser import parse
 from datetime import datetime
 
-from parquet2bigquery.logs import configure_logging
-
 from multiprocessing import Process, JoinableQueue, Lock
 
 
-log = configure_logging()
+# sample message 2019-02-07 12:34:55,439 root WARNING yay
+logging.basicConfig(format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 # defaults
 DEFAULT_DATASET = 'telemetry'
@@ -55,12 +55,12 @@ def get_date_format(date):
     for date_format in date_formats:
         try:
             datetime.strptime(date, date_format)
-            log.info("date format {} detected".format(date_format))
+            logging.info("date format {} detected.".format(date_format))
             return date_format
         except ValueError:
             continue
 
-    log.error('Date format not detected, exit')
+    logging.error('Date format not detected, exiting.')
     exit
 
 
@@ -141,7 +141,7 @@ def create_bq_table(table_id, dataset, schema=None, partition_field=None):
     table = client.create_table(table)
 
     assert table.table_id == table_id
-    log.info('%s: table created.' % table_id)
+    logging.info('%s: table created.' % table_id)
 
 
 def get_bq_table_schema(table_id, dataset):
@@ -171,7 +171,7 @@ def update_bq_table_schema(table_id, schema_additions, dataset):
 
     table.schema = new_schema
     table = client.update_table(table, ['schema'])
-    log.info('%s: BigQuery table schema updated.' % table_id)
+    logging.info('%s: BigQuery table schema updated.' % table_id)
 
 
 def generate_bq_schema(table_id, dataset, date_partition_field=None,
@@ -224,14 +224,13 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
         job_config=job_config)
     assert load_job.job_type == 'load'
     load_job.result()
-    log.info('%s: Parquet file %s loaded into BigQuery.' % (table_id, object))
+    logging.info('%s: Parquet file %s loaded into BigQuery.' % (table_id, object))
 
 
 def _compare_columns(col1, col2):
     """
         Compare two columns to see if they are changing.
     """
-
 
     a = []
     if isinstance(col1, tuple):
@@ -352,7 +351,7 @@ def load_bq_query_to_table(query, table_id, dataset):
 
     query_job = client.query(query, job_config=job_config)
     query_job.result()
-    log.info('{}: query results loaded'.format(table_id))
+    logging.info('{}: query results loaded.'.format(table_id))
 
 
 def check_bq_table_exists(table_id, dataset):
@@ -365,10 +364,10 @@ def check_bq_table_exists(table_id, dataset):
     try:
         table = client.get_table(table_ref)
         if table:
-            log.info('{}: table exists.'.format(table_id))
+            logging.info('{}: table exists.'.format(table_id))
             return True
     except google.api_core.exceptions.NotFound:
-        log.info('{}: table does not exist.'.format(table_id))
+        logging.info('{}: table does not exist.'.format(table_id))
         return False
 
 
@@ -380,7 +379,7 @@ def delete_bq_table(table_id, dataset=DEFAULT_TMP_DATASET):
 
     try:
         client.delete_table(table_ref)
-        log.info('{}: table deleted.'.format(table_id))
+        logging.info('{}: table deleted.'.format(table_id))
     except google.api_core.exceptions.NotFound:
         pass
 
@@ -447,7 +446,7 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
 
     # We don't care about these objects
     if ignore_key(object):
-        log.warning('Ignoring {}'.format(object))
+        logging.warning('Ignoring {}.'.format(object))
         return
 
     meta = _get_object_key_metadata(object)
@@ -484,8 +483,8 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         delete_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
-        log.exception('%s: BigQuery Retryable Error' % table_id)
-        raise GCWarning('BigQuery Retryable Error')
+        logging.exception('%s: BigQuery Retryable Error.' % table_id)
+        raise GCWarning('BigQuery Retryable Error,')
 
     # Data is now loaded, we want to grab the schema of the table
     try:
@@ -495,8 +494,8 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
                                         meta['partitions'])
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
-        log.exception('%s: GCS Retryable Error' % table_id)
-        raise GCWarning('GCS Retryable Error')
+        logging.exception('%s: GCS Retryable Error.' % table_id)
+        raise GCWarning('GCS Retryable Error.')
 
     # Try to create the primary BigQuery table
     if lock:
@@ -518,14 +517,16 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     if len(schema_additions) > 0:
         update_bq_table_schema(table_id, schema_additions, dest_dataset)
 
-    log.info('%s: loading %s/%s to BigQuery table %s' % (table_id, bucket_name,
-                                                         obj, table_id_tmp))
+    logging.info('%s: loading %s/%s to BigQuery table %s' % (table_id,
+                                                             bucket_name,
+                                                             obj,
+                                                             table_id_tmp))
     # Try to load the temp table data into primary table
     try:
         load_bq_query_to_table(query, table_id, dest_dataset)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
-        log.exception('%s: BigQuery Retryable Error' % table_id)
+        logging.exception('%s: BigQuery Retryable Error' % table_id)
         raise GCWarning('BigQuery Retryable Error')
     finally:
         delete_bq_table(table_id_tmp)
@@ -595,7 +596,7 @@ def remove_loaded_objects(objects, dataset, alias):
         key = '/'.join(path_prefix + spath)
         try:
             del objects[key]
-            log.debug('key {} already loaded into BigQuery'.format(key))
+            logging.debug('key {} already loaded into BigQuery'.format(key))
         except KeyError:
             continue
 
@@ -621,13 +622,13 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     else:
         _dest_dataset = DEFAULT_DATASET
 
-    log.info('main_process: dataset set to {}'.format(_dest_dataset))
+    logging.info('main_process: dataset set to {}'.format(_dest_dataset))
 
     q = JoinableQueue()
     lock = Lock()
 
     if glob_load:
-        log.info('main_process: loading via glob method')
+        logging.info('main_process: loading via glob method')
         objects = get_latest_object(bucket_name, prefix)
         if resume_load:
             objects = remove_loaded_objects(objects, _dest_dataset, alias)
@@ -635,7 +636,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         for dir, object in objects.items():
             q.put((bucket_name, dir, object))
     else:
-        log.info('main_process: loading via non-glob method')
+        logging.info('main_process: loading via non-glob method')
         objects = list_blobs_with_prefix(bucket_name, prefix)
         for object in objects:
             q.put((bucket_name, None, object))
@@ -645,7 +646,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         p.daemon = True
         p.start()
 
-    log.info('main_process: {} total tasks in queue'.format(q.qsize()))
+    logging.info('main_process: {} total tasks in queue'.format(q.qsize()))
 
     q.join()
 
@@ -653,30 +654,30 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         q.put(None)
 
     p.join()
-    log.info('main_process: done')
+    logging.info('main_process: done')
 
 
 def _bulk_run(process_id, lock, q, dest_dataset, alias):
     """
         Process run job
     """
-    log.info('Process-{}: started'.format(process_id))
+    logging.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
         bucket_name, dir, object = item
         try:
             o = object if dir is None else dir
-            log.info('Process-{}: running {}'.format(process_id, o))
+            logging.info('Process-{}: running {}'.format(process_id, o))
             run(bucket_name, object, dest_dataset, dir=dir,
                 lock=lock, alias=alias)
         except GCWarning:
             q.put(item)
-            log.warn('Process-{}: Re-queueed {}'
-                     'due to warning'.format(process_id,
-                                             object))
+            logging.warning('Process-{}: Re-queued {} '
+                            'due to warning'.format(process_id,
+                                                    object))
         finally:
             q.task_done()
-            log.info('Process-{}: {} tasks left in queue'.format(process_id,
-                                                                 q.qsize()))
+            logging.info('Process-{}: {} tasks left '
+                         'in queue'.format(process_id, q.qsize()))
     q.task_done()
-    log.info('Process-{}: done'.format(process_id))
+    logging.info('Process-{}: done'.format(process_id))
