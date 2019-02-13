@@ -88,39 +88,58 @@ def normalize_table_id(table_name):
     return table_name.replace("-", "_").lower()
 
 
-def _get_object_key_metadata(object):
+def _get_object_key_metadata(object_key):
     """
         Parse object key and return useful metadata.
+
+        sample object_key:
+        'table_name/vtable_version/date_partition=x/first_partition=y/...'
+
+        args:
+            object_key - contains the gcs object key (str)
+        returns:
+            dict:
+                partitions: non date partitions (list)
+                table_id: derived table_id (str)
+                date_partition: (dict)
+                    format: date time format (str)
+                    value: date value (str)
+                    field: date partition field name (str)
     """
 
     meta = {
-        'partitions': []
+        'partitions': [],
+        'date_partition': {}
     }
-    o = object.split('/')
+
+    split_key = object_key.split('/')
 
     p_elems_idx = []
-    for elem in o:
+
+    for elem in split_key:
         if '=' in elem:
-            p_elems_idx.append(o.index(elem))
+            p_elems_idx.append(split_key.index(elem))
 
     first_part_idx = min(p_elems_idx)
 
-    table_version = o[first_part_idx - 1]
-    table_name = o[first_part_idx - 2]
+    table_version = split_key[first_part_idx - 1]
+    table_name = split_key[first_part_idx - 2]
 
     meta['first_part_idx'] = first_part_idx
 
     meta['table_id'] = normalize_table_id('_'.join([table_name,
                                                     table_version]))
 
-    meta['date_partition'] = o[first_part_idx].split('=')
-    meta['date_format'] = get_date_format(meta['date_partition'][1])
-    meta['date_partition'][1] = parse(meta['date_partition'][1]).strftime('%Y-%m-%d')
+    date_field, date_value = split_key[first_part_idx].split('=')
+    meta['date_partition']['field'] = date_field
+    meta['date_partition']['format'] = get_date_format(date_value)
+    meta['date_partition']['value'] = parse(date_value).strftime('%Y-%m-%d')
 
-    # try to get partition information
-    for dir in o[first_part_idx+1:]:
-        if '=' in dir:
-            meta['partitions'].append(dir.split('='))
+    # try to get additional partition information
+    extra_partitions = [elem.split('=')
+                        for elem in split_key[first_part_idx+1]
+                        if '=' in elem]
+    meta['partitions'] += extra_partitions
 
     return meta
 
@@ -455,8 +474,9 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
         table_id = alias
     else:
         table_id = meta['table_id']
-    date_partition_field = meta['date_partition'][0]
-    date_partition_value = meta['date_partition'][1]
+
+    date_partition_field = meta['date_partition']['field']
+    date_partition_value = meta['date_partition']['value']
 
     table_id_tmp = normalize_table_id('_'.join([meta['table_id'],
                                       date_partition_value,
@@ -532,7 +552,8 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
         delete_bq_table(table_id_tmp)
 
 
-def get_bq_table_partitions(table_id, date_partition, dataset, partitions=[]):
+def get_bq_table_partitions(table_id, date_partition_field,
+                            dataset, partitions=[]):
     """
         Get all the partitions available in a BigQuery table.
         This is used for resume operations.
@@ -542,7 +563,7 @@ def get_bq_table_partitions(table_id, date_partition, dataset, partitions=[]):
     s_items = []
     reconstruct_paths = []
 
-    s_items.append(date_partition[0])
+    s_items.append(date_partition_field)
 
     for partition in partitions:
         s_items.append(partition[0])
@@ -585,13 +606,13 @@ def remove_loaded_objects(objects, dataset, alias):
         return objects
 
     object_paths = get_bq_table_partitions(table_id,
-                                           meta['date_partition'],
+                                           meta['date_partition']['field'],
                                            dataset,
                                            meta['partitions'])
 
     for path in object_paths:
         spath = path.split('/')
-        date_value = parse(spath[0].split('=')[1]).strftime(meta['date_format'])
+        date_value = parse(spath[0].split('=')[1]).strftime(meta['date_partition']['format'])
         spath[0] = '='.join([meta['date_partition'][0]] + [date_value])
         key = '/'.join(path_prefix + spath)
         try:
