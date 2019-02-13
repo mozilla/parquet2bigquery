@@ -45,7 +45,7 @@ def get_bq_client(table_id, dataset):
 
 def get_date_format(date):
     """
-        Attempt to determine the date format.
+    Attempt to determine the date format.
     """
     date_formats = [
         '%Y%m%d',
@@ -66,7 +66,7 @@ def get_date_format(date):
 
 def gen_rand_string(size=5):
     """
-        Generate a random string.
+    Generate a random string.
     """
     char_set = string.ascii_lowercase + string.digits
     return ''.join(random.choice(char_set) for x in range(size))
@@ -74,7 +74,7 @@ def gen_rand_string(size=5):
 
 def ignore_key(key, exclude_regex=None):
     """
-        Ignore a string based on IGNORE_PATTERNS.
+    Ignore a string based on IGNORE_PATTERNS.
     """
     if exclude_regex is None:
         exclude_regex = []
@@ -83,28 +83,28 @@ def ignore_key(key, exclude_regex=None):
 
 def normalize_table_id(table_name):
     """
-        Normalize table name for use with BigQuery.
+    Normalize table name for use with BigQuery.
     """
     return table_name.replace("-", "_").lower()
 
 
 def _get_object_key_metadata(object_key):
     """
-        Parse object key and return useful metadata.
+    Parse object key and return useful metadata.
 
-        sample object_key:
-        'table_name/vtable_version/date_partition=x/first_partition=y/...'
+    sample object_key:
+    'table_name/vtable_version/date_partition=x/first_partition=y/...'
 
-        args:
-            object_key - contains the gcs object key (str)
-        returns:
-            dict:
-                partitions: non date partitions (list)
-                table_id: derived table_id (str)
-                date_partition: (dict)
-                    format: date time format (str)
-                    value: date value (str)
-                    field: date partition field name (str)
+    Args:
+        object_key - contains the gcs object key (str)
+    Returns:
+        A dict which contains:
+        partitions: non date partitions (list)
+        table_id: derived table_id (str)
+        date_partition: (dict)
+            format: date time format (str)
+            value: date value (str)
+            field: date partition field name (str)
     """
 
     meta = {
@@ -146,7 +146,7 @@ def _get_object_key_metadata(object_key):
 
 def create_bq_table(table_id, dataset, schema=None, partition_field=None):
     """
-        Create a BigQuery table.
+    Create a BigQuery table.
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
@@ -165,7 +165,7 @@ def create_bq_table(table_id, dataset, schema=None, partition_field=None):
 
 def get_bq_table_schema(table_id, dataset):
     """
-        Get a BigQuery table schema.
+    Get a BigQuery table schema.
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
@@ -177,7 +177,7 @@ def get_bq_table_schema(table_id, dataset):
 
 def update_bq_table_schema(table_id, schema_additions, dataset):
     """
-        Update a BigQuery table schema.
+    Update a BigQuery table schema.
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
@@ -196,9 +196,9 @@ def update_bq_table_schema(table_id, schema_additions, dataset):
 def generate_bq_schema(table_id, dataset, date_partition_field=None,
                        partitions=None):
     """
-        Generate a BigQuery schema based on the current BigQuery schema
-        and appending object key metadata like date partition and other
-        partition information.
+    Generate a BigQuery schema based on the current BigQuery schema
+    and appending object key metadata like date partition and other
+    partition information.
     """
     p_fields = []
 
@@ -218,7 +218,7 @@ def generate_bq_schema(table_id, dataset, date_partition_field=None,
 def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
                        partition=None):
     """
-        Load parquet data into BigQuery.
+    Load parquet data into BigQuery.
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
@@ -248,7 +248,7 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
 
 def _compare_columns(col1, col2):
     """
-        Compare two columns to see if they are changing.
+    Compare two columns to see if they are changing.
     """
 
     a = []
@@ -267,9 +267,9 @@ def _compare_columns(col1, col2):
 
 def get_schema_diff(schema1, schema2):
     """
-        Compare two BigQuery table schemas and get the additional columns.
-        schema2 should contain the latest schema and schema1 should be
-        the current schema. We only append additional columns.
+    Compare two BigQuery table schemas and get the additional columns.
+    schema2 should contain the latest schema and schema1 should be
+    the current schema. We only append additional columns.
     """
     s = []
     diff = set(schema2) - set(schema1)
@@ -292,8 +292,8 @@ def construct_select_query(table_id, date_partition, partitions=None,
                            dataset=DEFAULT_TMP_DATASET):
 
     """
-        Construct a query to select all data from a temp table, append
-        the relevant partitions and output into the primary table
+    Construct a query to select all data from a temp table, append
+    the relevant partitions and output into the primary table
     """
 
     s_items = ['SELECT *']
@@ -318,9 +318,9 @@ def construct_select_query(table_id, date_partition, partitions=None,
 def check_bq_partition_exists(table_id, date_partition, dataset,
                               partitions=None):
     """
-        Based on available partition information for object key
-        construct a query to determine what partitions are currently in a
-        BigQuery table.
+    Based on available partition information for object key
+    construct a query to determine what partitions are currently in a
+    BigQuery table.
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
@@ -359,7 +359,7 @@ def check_bq_partition_exists(table_id, date_partition, dataset,
 
 def load_bq_query_to_table(query, table_id, dataset):
     """
-        Execute constructed query to load data into BigQuery.
+    Execute constructed query to load data into BigQuery.
     """
 
     job_config = bigquery.QueryJobConfig()
@@ -375,7 +375,7 @@ def load_bq_query_to_table(query, table_id, dataset):
 
 def check_bq_table_exists(table_id, dataset):
     """
-        Check to see if a BigQuery table exists.
+    Check to see if a BigQuery table exists.
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
@@ -392,7 +392,7 @@ def check_bq_table_exists(table_id, dataset):
 
 def delete_bq_table(table_id, dataset=DEFAULT_TMP_DATASET):
     """
-        Delete a BigQuery table.
+    Delete a BigQuery table.
     """
     client, table_ref = get_bq_client(table_id, dataset)
 
@@ -405,7 +405,7 @@ def delete_bq_table(table_id, dataset=DEFAULT_TMP_DATASET):
 
 def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
     """
-        Return a list of all objects in a bucket prefix.
+    Return a list of all objects in a bucket prefix.
     """
     storage_client = storage.Client()
     bucket = storage_client.get_bucket(bucket_name)
@@ -422,7 +422,7 @@ def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
 
 def get_latest_object(bucket_name, prefix, delimiter=None):
     """
-        Get the latest object in a bucket prefix.
+    Get the latest object in a bucket prefix.
     """
     storage_client = storage.Client()
     bucket = storage_client.get_bucket(bucket_name)
@@ -448,7 +448,7 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
 def create_primary_bq_table(table_id, new_schema, date_partition_field,
                             dataset):
     """
-        Crate the primary BigQuery table for a imported dataset
+    Crate the primary BigQuery table for a imported dataset
     """
     if not check_bq_table_exists(table_id, dataset):
         try:
@@ -460,7 +460,7 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field,
 
 def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     """
-       Take an object(s) load it into BigQuery
+    Take an object(s) load it into BigQuery
     """
 
     # We don't care about these objects
@@ -555,8 +555,8 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
 def get_bq_table_partitions(table_id, date_partition_field,
                             dataset, partitions=[]):
     """
-        Get all the partitions available in a BigQuery table.
-        This is used for resume operations.
+    Get all the partitions available in a BigQuery table.
+    This is used for resume operations.
     """
     client, table_ref = get_bq_client(table_id, dataset)
 
@@ -590,8 +590,8 @@ def get_bq_table_partitions(table_id, date_partition_field,
 
 def remove_loaded_objects(objects, dataset, alias):
     """
-        Remove objects from list that have already been loaded
-        into the BigQuery table.
+    Remove objects from list that have already been loaded
+    into the BigQuery table.
     """
     initial_object_tmp = list(objects)[0]
     meta = _get_object_key_metadata(initial_object_tmp)
@@ -627,15 +627,15 @@ def remove_loaded_objects(objects, dataset, alias):
 def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
          dest_dataset=None, alias=None):
     """
-        Load data into BigQuery concurrently
-        args:
-            bucket_name: gcs bucket name
-            prefix: object key path, 'dataset/version'
-            concurrency: number of processes to handle the load
-            glob_load: load data by globbing path dirs
-            resume_load: resume load
-            dest_dataset: override default dataset location
-            alias: override object key dervived table name
+    Load data into BigQuery concurrently
+    Args:
+        bucket_name: gcs bucket name (str)
+        prefix: object key path, 'dataset/version' (str)
+        concurrency: number of processes to handle the load (int)
+        glob_load: load data by globbing path dirs (boolean)
+        resume_load: resume load (boolean)
+        dest_dataset: override default dataset location (str)
+        alias: override object key dervived table name (str)
     """
 
     if dest_dataset:
@@ -680,7 +680,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
 
 def _bulk_run(process_id, lock, q, dest_dataset, alias):
     """
-        Process run job
+    Process run job
     """
     logging.info('Process-{}: started'.format(process_id))
 
