@@ -1,17 +1,13 @@
-import google.api_core.exceptions
 import logging
 import re
 import secrets
-
-from google.cloud import storage
-from google.cloud import bigquery
-from google.cloud.bigquery.table import TimePartitioning
-from google.cloud.bigquery.table import TimePartitioningType
-
 from dateutil.parser import parse
 from datetime import datetime
-
 from multiprocessing import Process, JoinableQueue, Lock
+
+import google.api_core.exceptions
+from google.cloud import storage, bigquery
+from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 
 
 # sample message 2019-02-07 12:34:55,439 root WARNING yay
