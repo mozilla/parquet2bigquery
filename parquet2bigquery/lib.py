@@ -70,12 +70,10 @@ def gen_rand_string(size=5):
     return secrets.token_hex(size)
 
 
-def ignore_key(key, exclude_regex=None):
+def ignore_key(key, exclude_regex=[]):
     """
     Ignore a string based on IGNORE_PATTERNS.
     """
-    if exclude_regex is None:
-        exclude_regex = []
     return any([re.match(pat, key) for pat in IGNORE_PATTERNS + exclude_regex])
 
 
