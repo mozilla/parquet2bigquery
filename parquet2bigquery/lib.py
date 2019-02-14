@@ -1,8 +1,7 @@
 import google.api_core.exceptions
 import logging
-import random
 import re
-import string
+import secrets
 
 from google.cloud import storage
 from google.cloud import bigquery
@@ -68,8 +67,7 @@ def gen_rand_string(size=5):
     """
     Generate a random string.
     """
-    char_set = string.ascii_lowercase + string.digits
-    return ''.join(random.choice(char_set) for x in range(size))
+    return secrets.token_hex(size)
 
 
 def ignore_key(key, exclude_regex=None):
