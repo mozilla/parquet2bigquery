@@ -31,6 +31,10 @@ class P2BWarning(Exception):
 
 
 def get_bq_client(table_id, dataset):
+    """
+    Returns a tuple that contains the BigQuery client and TableReference.
+
+    """
     client = bigquery.Client()
     dataset_ref = client.dataset(dataset)
     table_ref = dataset_ref.table(table_id)
