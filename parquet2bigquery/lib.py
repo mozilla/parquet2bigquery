@@ -31,7 +31,7 @@ IGNORE_PATTERNS = [
 ]
 
 
-class GCWarning(Exception):
+class P2BWarning(Exception):
     pass
 
 
@@ -499,7 +499,7 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
             google.api_core.exceptions.ServiceUnavailable):
         delete_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
         logging.exception('%s: BigQuery Retryable Error.' % table_id)
-        raise GCWarning('BigQuery Retryable Error,')
+        raise P2BWarning('BigQuery Retryable Error,')
 
     # Data is now loaded, we want to grab the schema of the table
     try:
@@ -510,7 +510,7 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         logging.exception('%s: GCS Retryable Error.' % table_id)
-        raise GCWarning('GCS Retryable Error.')
+        raise P2BWarning('GCS Retryable Error.')
 
     # Try to create the primary BigQuery table
     if lock:
@@ -542,7 +542,7 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         logging.exception('%s: BigQuery Retryable Error' % table_id)
-        raise GCWarning('BigQuery Retryable Error')
+        raise P2BWarning('BigQuery Retryable Error')
     finally:
         delete_bq_table(table_id_tmp)
 
@@ -686,7 +686,7 @@ def _bulk_run(process_id, lock, q, dest_dataset, alias):
             logging.info('Process-{}: running {}'.format(process_id, o))
             run(bucket_name, object, dest_dataset, dir=dir,
                 lock=lock, alias=alias)
-        except GCWarning:
+        except P2BWarning:
             q.put(item)
             logging.warning('Process-{}: Re-queued {} '
                             'due to warning'.format(process_id,
