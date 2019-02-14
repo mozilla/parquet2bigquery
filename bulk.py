@@ -30,29 +30,29 @@ def main():
     glob_group = parser.add_mutually_exclusive_group()
 
     glob_group.add_argument("-g", "--glob-load",
-                            dest='globload',
+                            dest='glob_load',
                             action="store_true")
-    glob_group.add_argument("-ng", "--no-glob-load",
-                            dest='globload',
+    glob_group.add_argument("-G", "--no-glob-load",
+                            dest='glob_load',
                             action="store_false")
 
-    parser.set_defaults(globload=True)
+    parser.set_defaults(glob_load=True)
 
     resume_group = parser.add_mutually_exclusive_group()
 
     resume_group.add_argument("-r", "--resume",
-                              dest='resumeload',
+                              dest='resume_load',
                               action="store_true")
-    resume_group.add_argument("-nr", "--no-resume",
-                              dest='resumeload',
+    resume_group.add_argument("-R", "--no-resume",
+                              dest='resume_load',
                               action="store_false")
 
-    parser.set_defaults(resumeload=True)
+    parser.set_defaults(resume_load=True)
 
     args = parser.parse_args()
 
-    bulk(args.bucket, args.prefix, args.concurrency, args.globload,
-         args.resumeload, dest_dataset=args.dataset, alias=args.alias)
+    bulk(args.bucket, args.prefix, args.concurrency, args.glob_load,
+         args.resume_load, dest_dataset=args.dataset, alias=args.alias)
 
 
 main()
