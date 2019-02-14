@@ -80,8 +80,17 @@ def ignore_key(key, exclude_regex=[]):
 def normalize_table_id(table_name):
     """
     Normalize table name for use with BigQuery.
+    * Contain up to 1,024 characters
+    * Contain letters (upper or lower case), numbers, and underscores
+
+    We intentionally lower case the table_name.
+
+    https://cloud.google.com/bigquery/docs/tables
     """
-    return table_name.replace("-", "_").lower()
+    if len(table_name) > 1024:
+        raise ValueError('table_name cannot contain more than 1024 characters')
+    else:
+        return re.sub('\W+', '_', table_name).lower()
 
 
 def _get_object_key_metadata(object_key):
