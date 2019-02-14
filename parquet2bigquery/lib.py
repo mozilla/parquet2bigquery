@@ -159,7 +159,6 @@ def create_bq_table(table_id, dataset, schema=None, partition_field=None):
 
     table = client.create_table(table)
 
-    assert table.table_id == table_id
     logging.info('%s: table created.' % table_id)
 
 
@@ -241,9 +240,10 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
         uri,
         table_ref,
         job_config=job_config)
-    assert load_job.job_type == 'load'
+
     load_job.result()
-    logging.info('%s: Parquet file %s loaded into BigQuery.' % (table_id, object))
+    logging.info('%s: Parquet file %s loaded into BigQuery.' % (table_id,
+                                                                object))
 
 
 def _compare_columns(col1, col2):
@@ -293,7 +293,7 @@ def construct_select_query(table_id, date_partition, partitions=None,
 
     """
     Construct a query to select all data from a temp table, append
-    the relevant partitions and output into the primary table
+    the relevant partitions and output into the primary table.
     """
 
     s_items = ['SELECT *']
