@@ -214,7 +214,7 @@ def generate_bq_schema(table_id, dataset, date_partition_field=None,
     return p_fields + schema
 
 
-def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
+def load_parquet_to_bq(bucket, object_key, table_id, dataset, schema=None,
                        partition=None):
     """
     Load parquet data into BigQuery.
@@ -231,7 +231,7 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
         bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION
     ]
 
-    uri = 'gs://{}/{}'.format(bucket, object)
+    uri = 'gs://{}/{}'.format(bucket, object_key)
 
     if partition:
         table_id = '{}${}'.format(table_id, partition)
@@ -242,8 +242,9 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
         job_config=job_config)
 
     load_job.result()
-    logging.info('{}: Parquet file {} loaded into BigQuery.'.format(table_id,
-                                                                    object))
+    logging.info('{}: Parquet file {} loaded '
+                 'into BigQuery.'.format(table_id,
+                                         object_key))
 
 
 def _compare_columns(col1, col2):
@@ -411,13 +412,13 @@ def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
     bucket = storage_client.get_bucket(bucket_name)
     blobs = bucket.list_blobs(prefix=prefix, delimiter=delimiter)
 
-    objects = []
+    object_keys = []
 
     for blob in blobs:
         if not ignore_key(blob.name):
-            objects.append(blob.name)
+            object_keys.append(blob.name)
 
-    return objects
+    return object_keys
 
 
 def get_latest_object(bucket_name, prefix, delimiter=None):
@@ -433,14 +434,14 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
 
     for blob in blobs:
         if not ignore_key(blob.name):
-            dir = '/'.join(blob.name.split('/')[0:-1])
-            if latest_objects_tmp.get(dir):
-                if latest_objects_tmp[dir] < blob.updated:
-                    latest_objects_tmp[dir] = blob.updated
-                    latest_objects[dir] = blob.name
+            path = '/'.join(blob.name.split('/')[0:-1])
+            if latest_objects_tmp.get(path):
+                if latest_objects_tmp[path] < blob.updated:
+                    latest_objects_tmp[path] = blob.updated
+                    latest_objects[path] = blob.name
             else:
-                latest_objects_tmp[dir] = blob.updated
-                latest_objects[dir] = blob.name
+                latest_objects_tmp[path] = blob.updated
+                latest_objects[path] = blob.name
 
     return latest_objects
 
@@ -458,17 +459,18 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field,
             pass
 
 
-def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
+def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
+        alias=None):
     """
     Take an object(s) load it into BigQuery
     """
 
     # We don't care about these objects
-    if ignore_key(object):
-        logging.warning('Ignoring {}.'.format(object))
+    if ignore_key(object_key):
+        logging.warning('Ignoring {}.'.format(object_key))
         return
 
-    meta = _get_object_key_metadata(object)
+    meta = _get_object_key_metadata(object_key)
 
     if alias:
         table_id = alias
@@ -486,19 +488,19 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
                                    partitions=meta['partitions'])
 
     # We assume that the data will have the following extensions
-    if dir:
-        obj = '{}/*'.format(dir)
-        if object.endswith('parquet'):
-            obj += 'parquet'
-        elif object.endswith('internal'):
-            obj += 'internal'
+    if path:
+        object_key_load = '{}/*'.format(path)
+        if object_key.endswith('parquet'):
+            object_key_load += 'parquet'
+        elif object_key.endswith('internal'):
+            object_key_load += 'internal'
     else:
-        obj = object
+        object_key_load = object_key
 
     # Create a temp table and load the data into temp table
     try:
         create_bq_table(table_id_tmp, DEFAULT_TMP_DATASET)
-        load_parquet_to_bq(bucket_name, obj, table_id_tmp,
+        load_parquet_to_bq(bucket_name, object_key_load, table_id_tmp,
                            DEFAULT_TMP_DATASET)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
@@ -537,10 +539,11 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     if len(schema_additions) > 0:
         update_bq_table_schema(table_id, schema_additions, dest_dataset)
 
-    logging.info('{}: loading {}/{} to BigQuery table {}'.format(table_id,
-                                                                 bucket_name,
-                                                                 obj,
-                                                                 table_id_tmp))
+    logging.info('{}: loading {}/{} to BigQuery '
+                 'table {}'.format(table_id,
+                                   bucket_name,
+                                   object_key_load,
+                                   table_id_tmp))
     # Try to load the temp table data into primary table
     try:
         load_bq_query_to_table(query, table_id, dest_dataset)
@@ -650,17 +653,18 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
 
     if glob_load:
         logging.info('main_process: loading via glob method')
-        objects = get_latest_object(bucket_name, prefix)
+        object_keys = get_latest_object(bucket_name, prefix)
         if resume_load:
-            objects = remove_loaded_objects(objects, _dest_dataset, alias)
+            object_keys = remove_loaded_objects(object_keys,
+                                                _dest_dataset, alias)
 
-        for dir, object in objects.items():
-            q.put((bucket_name, dir, object))
+        for path, object_key in object_keys.items():
+            q.put((bucket_name, path, object_key))
     else:
         logging.info('main_process: loading via non-glob method')
-        objects = list_blobs_with_prefix(bucket_name, prefix)
-        for object in objects:
-            q.put((bucket_name, None, object))
+        object_keys = list_blobs_with_prefix(bucket_name, prefix)
+        for object_key in object_keys:
+            q.put((bucket_name, None, object_key))
 
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c, lock, q, _dest_dataset, alias,))
@@ -685,17 +689,17 @@ def _bulk_run(process_id, lock, q, dest_dataset, alias):
     logging.info('Process-{}: started'.format(process_id))
 
     for item in iter(q.get, None):
-        bucket_name, dir, object = item
+        bucket_name, path, object_key = item
         try:
-            o = object if dir is None else dir
-            logging.info('Process-{}: running {}'.format(process_id, o))
-            run(bucket_name, object, dest_dataset, dir=dir,
+            ok = object_key if path is None else path
+            logging.info('Process-{}: running {}'.format(process_id, ok))
+            run(bucket_name, object_key, dest_dataset, path=path,
                 lock=lock, alias=alias)
         except P2BWarning:
             q.put(item)
             logging.warning('Process-{}: Re-queued {} '
                             'due to warning'.format(process_id,
-                                                    object))
+                                                    ok))
         finally:
             q.task_done()
             logging.info('Process-{}: {} tasks left '
