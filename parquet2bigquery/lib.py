@@ -159,7 +159,7 @@ def create_bq_table(table_id, dataset, schema=None, partition_field=None):
 
     table = client.create_table(table)
 
-    logging.info('%s: table created.' % table_id)
+    logging.info('{}: table created.'.format(table_id))
 
 
 def get_bq_table_schema(table_id, dataset):
@@ -189,7 +189,7 @@ def update_bq_table_schema(table_id, schema_additions, dataset):
 
     table.schema = new_schema
     table = client.update_table(table, ['schema'])
-    logging.info('%s: BigQuery table schema updated.' % table_id)
+    logging.info('{}: BigQuery table schema updated.'.format(table_id))
 
 
 def generate_bq_schema(table_id, dataset, date_partition_field=None,
@@ -231,10 +231,10 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
         bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION
     ]
 
-    uri = 'gs://%s/%s' % (bucket, object)
+    uri = 'gs://{}/{}'.format(bucket, object)
 
     if partition:
-        table_id = '%s$%s' % (table_id, partition)
+        table_id = '{}${}'.format(table_id, partition)
 
     load_job = client.load_table_from_uri(
         uri,
@@ -242,8 +242,8 @@ def load_parquet_to_bq(bucket, object, table_id, dataset, schema=None,
         job_config=job_config)
 
     load_job.result()
-    logging.info('%s: Parquet file %s loaded into BigQuery.' % (table_id,
-                                                                object))
+    logging.info('{}: Parquet file {} loaded into BigQuery.'.format(table_id,
+                                                                    object))
 
 
 def _compare_columns(col1, col2):
@@ -503,8 +503,8 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
         delete_bq_table(table_id_tmp, dataset=DEFAULT_TMP_DATASET)
-        logging.exception('%s: BigQuery Retryable Error.' % table_id)
-        raise P2BWarning('BigQuery Retryable Error,')
+        logging.exception('{}: BigQuery Retryable Error.'.format(table_id))
+        raise P2BWarning('BigQuery Retryable Error.')
 
     # Data is now loaded, we want to grab the schema of the table
     try:
@@ -514,7 +514,7 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
                                         meta['partitions'])
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
-        logging.exception('%s: GCS Retryable Error.' % table_id)
+        logging.exception('{}: GCS Retryable Error.'.format(table_id))
         raise P2BWarning('GCS Retryable Error.')
 
     # Try to create the primary BigQuery table
@@ -537,16 +537,16 @@ def run(bucket_name, object, dest_dataset, dir=None, lock=None, alias=None):
     if len(schema_additions) > 0:
         update_bq_table_schema(table_id, schema_additions, dest_dataset)
 
-    logging.info('%s: loading %s/%s to BigQuery table %s' % (table_id,
-                                                             bucket_name,
-                                                             obj,
-                                                             table_id_tmp))
+    logging.info('{}: loading {}/{} to BigQuery table {}'.format(table_id,
+                                                                 bucket_name,
+                                                                 obj,
+                                                                 table_id_tmp))
     # Try to load the temp table data into primary table
     try:
         load_bq_query_to_table(query, table_id, dest_dataset)
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
-        logging.exception('%s: BigQuery Retryable Error' % table_id)
+        logging.exception('{}: BigQuery Retryable Error'.format(table_id))
         raise P2BWarning('BigQuery Retryable Error')
     finally:
         delete_bq_table(table_id_tmp)
