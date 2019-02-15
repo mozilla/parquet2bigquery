@@ -251,7 +251,6 @@ def _compare_columns(col1, col2):
     """
     Compare two columns to see if they are changing.
     """
-
     a = []
     if isinstance(col1, tuple):
         for i in range(len(col1)):
@@ -407,7 +406,7 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
 def create_primary_bq_table(table_id, new_schema, date_partition_field,
                             dataset):
     """
-    Crate the primary BigQuery table for a imported dataset
+    Create the primary BigQuery table for a imported dataset.
     """
     if not check_bq_table_exists(table_id, dataset):
         try:
@@ -420,7 +419,7 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field,
 def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
         alias=None):
     """
-    Take an object(s) load it into BigQuery
+    Take object(s) and load them into BigQuery.
     """
 
     # We don't care about these objects
