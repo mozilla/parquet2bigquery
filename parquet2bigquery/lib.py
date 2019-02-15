@@ -184,10 +184,7 @@ def update_bq_table_schema(table_id, schema_additions, dataset):
     table = client.get_table(table_ref)
     new_schema = table.schema[:]
 
-    for field in schema_additions:
-        new_schema.append(field)
-
-    table.schema = new_schema
+    table.schema = new_schema + schema_additions
     table = client.update_table(table, ['schema'])
     logging.info('{}: BigQuery table schema updated.'.format(table_id))
 
