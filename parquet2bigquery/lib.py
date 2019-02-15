@@ -316,48 +316,6 @@ def construct_select_query(table_id, date_partition, partitions=None,
     return query
 
 
-def check_bq_partition_exists(table_id, date_partition, dataset,
-                              partitions=None):
-    """
-    Based on available partition information for object key
-    construct a query to determine what partitions are currently in a
-    BigQuery table.
-    """
-
-    client, table_ref = get_bq_client(table_id, dataset)
-
-    job_config = bigquery.QueryJobConfig()
-    job_config.use_query_cache = False
-
-    count = 0
-    s_items = []
-    part_as = "{0} = '{1}'"
-
-    s_items.append(part_as.format(date_partition[0], date_partition[1]))
-
-    for partition in partitions:
-        s_items.append(part_as.format(*partition))
-
-    _tmp_s = ' AND '.join(s_items)
-
-    query = """
-    SELECT 1
-    FROM {0}.{1}
-    WHERE {2}
-    LIMIT 10
-    """.format(dataset, table_id, _tmp_s)
-
-    query_job = client.query(query, job_config=job_config)
-    results = query_job.result()
-    for row in results:
-        count += 1
-
-    if count == 0:
-        return False
-    else:
-        return True
-
-
 def load_bq_query_to_table(query, table_id, dataset):
     """
     Execute constructed query to load data into BigQuery.
