@@ -282,11 +282,11 @@ def get_schema_additions(current_schema, newest_schema):
     schema_diff = set(newest_schema) - set(current_schema)
 
     for sd_col in schema_diff:
-        for s1_col in current_schema:
+        for cs_col in current_schema:
             # check to see if the column we are attempting to add exists
-            if sd_col.name == s1_col.name:
+            if sd_col.name == cs_col.name:
                 # we found an existing column, find out what has changed
-                col = (_compare_columns(sd_col, s1_col))
+                col = (_compare_columns(sd_col, cs_col))
                 if col:
                     raise NotImplementedError()
             else:
