@@ -244,45 +244,52 @@ def load_parquet_to_bq(bucket, object_key, table_id, dataset, schema=None,
                                          object_key))
 
 
-def _compare_columns(col1, col2):
+def _compare_columns(new_col, cur_col):
     """
     Compare two columns to see if they are changing.
+    This is currently only checks to see if column MODE
+    is changing.
     """
-    a = []
-    if isinstance(col1, tuple):
-        for i in range(len(col1)):
-            a.append(_compare_columns(col1[i], col2[i]))
+    if isinstance(new_col, tuple):
+        for i in range(len(new_col)):
+            _compare_columns(new_col[i], cur_col[i])
 
-    if isinstance(col1, google.cloud.bigquery.schema.SchemaField):
-        if col1.fields and col2.fields:
-            a.append(_compare_columns(col1.fields, col2.fields))
+    if isinstance(new_col, google.cloud.bigquery.schema.SchemaField):
+        if new_col.fields and cur_col.fields:
+            _compare_columns(new_col.fields, cur_col.fields)
 
-        # if mode is changing from required to nullable ignore
-        if(col1.mode == 'REQUIRED' and col2.mode == 'NULLABLE'):
-            return None
+        # if mode is changing from NULLABLE to REQUIRED
+        if(new_col.mode == 'REQUIRED' and cur_col.mode == 'NULLABLE'):
+            logging.warn('Column mode changed from '
+                         'REQUIRED to NULLABLE, ignoring.')
+            return False
+
+    return False
 
 
-def get_schema_diff(schema1, schema2):
+def get_schema_additions(current_schema, newest_schema):
     """
     Compare two BigQuery table schemas and get the additional columns.
-    schema2 should contain the latest schema and schema1 should be
+    newest_schema should contain the latest schema and current_schema should be
     the current schema. We only append additional columns.
-    """
-    s = []
-    diff = set(schema2) - set(schema1)
 
-    for d in diff:
-        found = False
-        for o in schema1:
-            if d.name == o.name:
-                found = True
-                val = (_compare_columns(d, o))
-                if val:
-                    s.append(d)
-                    break
-        if not found:
-            s.append(d)
-    return(s)
+    Handling column changes are currently not implemented.
+    """
+    schema_additions = []
+
+    schema_diff = set(newest_schema) - set(current_schema)
+
+    for sd_col in schema_diff:
+        for s1_col in current_schema:
+            # check to see if the column we are attempting to add exists
+            if sd_col.name == s1_col.name:
+                # we found an existing column, find out what has changed
+                col = (_compare_columns(sd_col, s1_col))
+                if col:
+                    raise NotImplementedError()
+            else:
+                schema_additions.append(sd_col)
+    return schema_additions
 
 
 def construct_select_query(table_id, date_partition, partitions=None,
@@ -487,7 +494,7 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
 
     # Compare temp table schema with primary table schema
     current_schema = get_bq_table_schema(table_id, dest_dataset)
-    schema_additions = get_schema_diff(current_schema, new_schema)
+    schema_additions = get_schema_additions(current_schema, new_schema)
 
     # If there are additions then update the primary table
     if len(schema_additions) > 0:
