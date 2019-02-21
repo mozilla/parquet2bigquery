@@ -435,10 +435,7 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
 
     meta = _get_object_key_metadata(object_key)
 
-    if alias:
-        table_id = alias
-    else:
-        table_id = meta['table_id']
+    table_id = alias or meta['table_id']
 
     date_partition_field = meta['date_partition']['field']
     date_partition_value = meta['date_partition']['value']
@@ -604,10 +601,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         alias: override object key dervived table name (str)
     """
 
-    if dest_dataset:
-        _dest_dataset = dest_dataset
-    else:
-        _dest_dataset = DEFAULT_DATASET
+    _dest_dataset = dest_dataset or DEFAULT_DATASET
 
     logging.info('main_process: dataset set to {}'.format(_dest_dataset))
 
