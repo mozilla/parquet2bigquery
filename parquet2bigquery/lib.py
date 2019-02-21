@@ -196,19 +196,21 @@ def generate_bq_schema(table_id, dataset, date_partition_field=None,
     and appending object key metadata like date partition and other
     partition information.
     """
-    p_fields = []
+    partition_fields = []
 
     schema = get_bq_table_schema(table_id, dataset)
 
     if date_partition_field:
-        p_fields.append(bigquery.SchemaField(date_partition_field, 'DATE',
-                                             mode='REQUIRED'))
+        partition_fields.append(bigquery.SchemaField(date_partition_field,
+                                                     'DATE',
+                                                     mode='REQUIRED'))
     # we want to add the partitions to the schema
-    for part, _ in partitions:
-        p_fields.append(bigquery.SchemaField(part, 'STRING',
-                                             mode='REQUIRED'))
+    for partition, _ in partitions:
+        partition_fields.append(bigquery.SchemaField(partition,
+                                                     'STRING',
+                                                     mode='REQUIRED'))
 
-    return p_fields + schema
+    return partition_fields + schema
 
 
 def load_parquet_to_bq(bucket, object_key, table_id, dataset, schema=None,
