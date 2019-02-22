@@ -513,6 +513,8 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
 
 
 def get_bq_table_partitions(table_id, date_partition_field,
+                            data_partition_format,
+                            path_prefix,
                             dataset, partitions=[]):
     """
     Get all the partitions available in a BigQuery table.
@@ -523,24 +525,31 @@ def get_bq_table_partitions(table_id, date_partition_field,
     select_cols = []
     reconstruct_paths = []
 
-    select_cols.append(date_partition_field)
+    reformat_dp_field = ("FORMAT_DATE('{0}', {1})"
+                         " as {1}".format(data_partition_format,
+                                          date_partition_field))
+
+    select_cols.append(reformat_dp_field)
 
     for partition in partitions:
         select_cols.append(partition[0])
 
     _select_cols = ','.join(select_cols)
 
+    select_cols[0] = date_partition_field
+    group_cols = ','.join(select_cols)
+
     query = """
     SELECT {2}
     FROM {0}.{1}
-    GROUP BY {2}
-    """.format(dataset, table_id, _select_cols)
+    GROUP BY {3}
+    """.format(dataset, table_id, _select_cols, group_cols)
 
     query_job = client.query(query)
     results = query_job.result()
 
     for row in results:
-        tmp_path = []
+        tmp_path = [path_prefix]
         for item in select_cols:
             tmp_path.append('{}={}'.format(item, row[item]))
         reconstruct_paths.append('/'.join(tmp_path))
@@ -566,17 +575,14 @@ def remove_loaded_objects(objects, dataset, alias):
 
     object_paths = get_bq_table_partitions(table_id,
                                            dp['field'],
+                                           dp['format'],
+                                           path_prefix,
                                            dataset,
                                            meta['partitions'])
 
-    for path in object_paths:
-        spath = path.split('/')
-        date_value = parse(spath[0].split('=')[1]).strftime(dp['format'])
-        spath[0] = '{}={}'.format(dp['field'], date_value)
-        key = '/'.join(path_prefix + spath)
-
+    for key in object_paths:
         if objects.pop(key, False):
-            logging.debug('key {} already loaded into BigQuery'.format(key))
+            logging.info('key {} already loaded into BigQuery'.format(key))
 
     return objects
 
