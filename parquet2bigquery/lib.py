@@ -11,7 +11,8 @@ from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 
 
 # sample message 2019-02-07 12:34:55,439 root WARNING yay
-logging.basicConfig(format='%(asctime)s %(name)s %(levelname)s %(message)s')
+logging.basicConfig(format='%(asctime)s %(name)s %(levelname)s %(message)s',
+                    level=logging.INFO)
 
 # defaults
 DEFAULT_DATASET = 'telemetry'
