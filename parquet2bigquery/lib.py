@@ -119,8 +119,8 @@ def _get_object_key_metadata(object_key):
 
     split_key = object_key.split('/')
 
-    first_part_idx = next([index for index, elem in enumerate(split_key)
-                          if '=' in elem])
+    first_part_idx = next(iter([index for index, elem in enumerate(split_key)
+                          if '=' in elem]))
 
     table_version = split_key[first_part_idx - 1]
     table_name = split_key[first_part_idx - 2]
