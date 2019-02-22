@@ -64,7 +64,7 @@ def get_date_format(date):
     exit
 
 
-def gen_rand_string(size=5):
+def gen_rand_string(size=3):
     """
     Generate a random string.
     """
