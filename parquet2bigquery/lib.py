@@ -415,13 +415,13 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
     return latest_objects
 
 
-def create_primary_bq_table(table_id, new_schema, date_partition_field,
-                            dataset):
+def create_primary_bq_table(table_id, dataset,
+                            schema, date_partition_field):
     """
     Create the primary BigQuery table for a imported dataset.
     """
     if not check_bq_table_exists(table_id, dataset):
-        create_bq_table(table_id, dataset, new_schema,
+        create_bq_table(table_id, dataset, schema,
                         date_partition_field)
 
 
@@ -486,13 +486,13 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
     if lock:
         lock.acquire()
         try:
-            create_primary_bq_table(table_id, new_schema,
-                                    dp['field'], dest_dataset)
+            create_primary_bq_table(table_id, dest_dataset, new_schema,
+                                    dp['field'])
         finally:
             lock.release()
     else:
-        create_primary_bq_table(table_id, new_schema,
-                                dp['field'], dest_dataset)
+        create_primary_bq_table(table_id, dest_dataset, new_schema,
+                                dp['field'])
 
     # Compare temp table schema with primary table schema
     current_schema = get_bq_table_schema(table_id, dest_dataset)
