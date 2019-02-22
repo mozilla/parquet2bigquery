@@ -580,11 +580,9 @@ def remove_loaded_objects(objects, dataset, alias):
         date_value = parse(spath[0].split('=')[1]).strftime(dp['format'])
         spath[0] = '='.join(dp['field'] + [date_value])
         key = '/'.join(path_prefix + spath)
-        try:
-            del objects[key]
+
+        if objects.pop(key, False):
             logging.debug('key {} already loaded into BigQuery'.format(key))
-        except KeyError:
-            continue
 
     return objects
 
