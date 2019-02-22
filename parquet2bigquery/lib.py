@@ -294,7 +294,8 @@ def get_schema_additions(current_schema, newest_schema):
     return schema_additions
 
 
-def construct_select_query(table_id, date_partition, partitions=None,
+def construct_select_query(table_id, date_partition_field,
+                           date_partition_value, partitions=None,
                            dataset=DEFAULT_TMP_DATASET):
 
     """
@@ -304,8 +305,9 @@ def construct_select_query(table_id, date_partition, partitions=None,
 
     select_cols = ['SELECT *']
 
-    select_cols.append("CAST('{0}' AS DATE) as {1}".format(date_partition[1],
-                                                       date_partition[0]))
+    select_cols.append("CAST('{0}' AS DATE) "
+                       "as {1}".format(date_partition_value,
+                                       date_partition_field))
 
     part_as = "'{1}' as {0}"
     for partition in partitions:
@@ -444,7 +446,9 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
                                       date_partition_value,
                                       gen_rand_string()]))
 
-    query = construct_select_query(table_id_tmp, meta['date_partition'],
+    query = construct_select_query(table_id_tmp,
+                                   date_partition_field,
+                                   date_partition_value,
                                    partitions=meta['partitions'])
 
     # We assume that the data will have the following extensions
