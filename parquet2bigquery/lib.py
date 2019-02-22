@@ -579,7 +579,7 @@ def remove_loaded_objects(objects, dataset, alias):
     for path in object_paths:
         spath = path.split('/')
         date_value = parse(spath[0].split('=')[1]).strftime(dp['format'])
-        spath[0] = '='.join(dp['field'] + [date_value])
+        spath[0] = '{}={}'.format(dp['field'], date_value)
         key = '/'.join(path_prefix + spath)
 
         if objects.pop(key, False):
