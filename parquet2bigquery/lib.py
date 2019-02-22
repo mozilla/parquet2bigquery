@@ -137,7 +137,7 @@ def _get_object_key_metadata(object_key):
 
     # try to get additional partition information
     extra_partitions = [elem.split('=')
-                        for elem in split_key[first_part_idx+1]
+                        for elem in split_key[first_part_idx+1:]
                         if '=' in elem]
     meta['partitions'] += extra_partitions
 
