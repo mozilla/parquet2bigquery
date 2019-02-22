@@ -302,21 +302,21 @@ def construct_select_query(table_id, date_partition, partitions=None,
     the relevant partitions and output into the primary table.
     """
 
-    s_items = ['SELECT *']
+    select_cols = ['SELECT *']
 
-    s_items.append("CAST('{0}' AS DATE) as {1}".format(date_partition[1],
+    select_cols.append("CAST('{0}' AS DATE) as {1}".format(date_partition[1],
                                                        date_partition[0]))
 
     part_as = "'{1}' as {0}"
     for partition in partitions:
-        s_items.append(part_as.format(*partition))
+        select_cols.append(part_as.format(*partition))
 
-    _tmp_s = ','.join(s_items)
+    _select_cols = ','.join(select_cols)
 
     query = """
     {0}
     FROM {1}.{2}
-    """.format(_tmp_s, dataset, table_id)
+    """.format(_select_cols, dataset, table_id)
 
     return query
 
@@ -523,28 +523,28 @@ def get_bq_table_partitions(table_id, date_partition_field,
     """
     client, table_ref = get_bq_client(table_id, dataset)
 
-    s_items = []
+    select_cols = []
     reconstruct_paths = []
 
-    s_items.append(date_partition_field)
+    select_cols.append(date_partition_field)
 
     for partition in partitions:
-        s_items.append(partition[0])
+        select_cols.append(partition[0])
 
-    _tmp_s = ','.join(s_items)
+    _select_cols = ','.join(select_cols)
 
     query = """
     SELECT {2}
     FROM {0}.{1}
     GROUP BY {2}
-    """.format(dataset, table_id, _tmp_s)
+    """.format(dataset, table_id, _select_cols)
 
     query_job = client.query(query)
     results = query_job.result()
 
     for row in results:
         tmp_path = []
-        for item in s_items:
+        for item in select_cols:
             tmp_path.append('{}={}'.format(item, row[item]))
         reconstruct_paths.append('/'.join(tmp_path))
 
