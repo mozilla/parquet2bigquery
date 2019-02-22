@@ -150,14 +150,18 @@ def create_bq_table(table_id, dataset, schema=None, partition_field=None):
     """
 
     client, table_ref = get_bq_client(table_id, dataset)
-    table = bigquery.Table(table_ref, schema=schema)
+    table_def = bigquery.Table(table_ref, schema=schema)
 
     if partition_field:
         _tp = TimePartitioning(type_=TimePartitioningType.DAY,
                                field=partition_field)
-        table.time_partitioning = _tp
+        table_def.time_partitioning = _tp
 
-    table = client.create_table(table)
+    try:
+        client.create_table(table_def)
+    except google.api_core.exceptions.Conflict:
+        logging.info('{}: BigQuery table already exists.'.format(table_id))
+        pass
 
     logging.info('{}: table created.'.format(table_id))
 
@@ -417,11 +421,8 @@ def create_primary_bq_table(table_id, new_schema, date_partition_field,
     Create the primary BigQuery table for a imported dataset.
     """
     if not check_bq_table_exists(table_id, dataset):
-        try:
-            create_bq_table(table_id, dataset, new_schema,
-                            date_partition_field)
-        except google.api_core.exceptions.Conflict:
-            pass
+        create_bq_table(table_id, dataset, new_schema,
+                        date_partition_field)
 
 
 def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
