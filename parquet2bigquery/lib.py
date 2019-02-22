@@ -436,19 +436,17 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
         return
 
     meta = _get_object_key_metadata(object_key)
+    dp = meta['date_partition']
 
     table_id = alias or meta['table_id']
 
-    date_partition_field = meta['date_partition']['field']
-    date_partition_value = meta['date_partition']['value']
-
     table_id_tmp = normalize_table_id('_'.join([meta['table_id'],
-                                      date_partition_value,
+                                      dp['value'],
                                       gen_rand_string()]))
 
     query = construct_select_query(table_id_tmp,
-                                   date_partition_field,
-                                   date_partition_value,
+                                   dp['field'],
+                                   dp['value'],
                                    partitions=meta['partitions'])
 
     # We assume that the data will have the following extensions
@@ -476,7 +474,7 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
     try:
         new_schema = generate_bq_schema(table_id_tmp,
                                         DEFAULT_TMP_DATASET,
-                                        date_partition_field,
+                                        dp['field'],
                                         meta['partitions'])
     except (google.api_core.exceptions.InternalServerError,
             google.api_core.exceptions.ServiceUnavailable):
@@ -488,12 +486,12 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
         lock.acquire()
         try:
             create_primary_bq_table(table_id, new_schema,
-                                    date_partition_field, dest_dataset)
+                                    dp['field'], dest_dataset)
         finally:
             lock.release()
     else:
         create_primary_bq_table(table_id, new_schema,
-                                date_partition_field, dest_dataset)
+                                dp['field'], dest_dataset)
 
     # Compare temp table schema with primary table schema
     current_schema = get_bq_table_schema(table_id, dest_dataset)
@@ -562,25 +560,24 @@ def remove_loaded_objects(objects, dataset, alias):
     """
     initial_object_tmp = list(objects)[0]
     meta = _get_object_key_metadata(initial_object_tmp)
+    dp = meta['date_partition']
+
     path_prefix = initial_object_tmp.split('/')[:meta['first_part_idx']]
 
-    if alias:
-        table_id = alias
-    else:
-        table_id = meta['table_id']
+    table_id = alias or meta['table_id']
 
     if not check_bq_table_exists(table_id, dataset):
         return objects
 
     object_paths = get_bq_table_partitions(table_id,
-                                           meta['date_partition']['field'],
+                                           dp['field'],
                                            dataset,
                                            meta['partitions'])
 
     for path in object_paths:
         spath = path.split('/')
-        date_value = parse(spath[0].split('=')[1]).strftime(meta['date_partition']['format'])
-        spath[0] = '='.join([meta['date_partition'][0]] + [date_value])
+        date_value = parse(spath[0].split('=')[1]).strftime(dp['format'])
+        spath[0] = '='.join(dp['field'] + [date_value])
         key = '/'.join(path_prefix + spath)
         try:
             del objects[key]
