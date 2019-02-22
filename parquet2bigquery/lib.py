@@ -484,14 +484,7 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
         raise P2BWarning('GCS Retryable Error.')
 
     # Try to create the primary BigQuery table
-    if lock:
-        lock.acquire()
-        try:
-            create_primary_bq_table(table_id, dest_dataset, new_schema,
-                                    dp['field'])
-        finally:
-            lock.release()
-    else:
+    with lock:
         create_primary_bq_table(table_id, dest_dataset, new_schema,
                                 dp['field'])
 
