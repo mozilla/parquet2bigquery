@@ -456,8 +456,6 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
         object_key_load = '{}/*'.format(path)
         if object_key.endswith('parquet'):
             object_key_load += 'parquet'
-        elif object_key.endswith('internal'):
-            object_key_load += 'internal'
     else:
         object_key_load = object_key
 
