@@ -547,7 +547,8 @@ def get_bq_table_partitions(table_id, date_partition_field,
     results = query_job.result()
 
     for row in results:
-        tmp_path = [path_prefix]
+        tmp_path = []
+        tmp_path += path_prefix
         for item in select_cols:
             tmp_path.append('{}={}'.format(item, row[item]))
         reconstruct_paths.append('/'.join(tmp_path))
