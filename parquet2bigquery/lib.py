@@ -370,6 +370,8 @@ def delete_bq_table(table_id, dataset=DEFAULT_TMP_DATASET):
         client.delete_table(table_ref)
         logging.info('{}: table deleted.'.format(table_id))
     except google.api_core.exceptions.NotFound:
+        logging.warn('{}: table cannot be deleted'
+                     'since it is not found.'.format(table_id))
         pass
 
 
