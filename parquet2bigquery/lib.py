@@ -560,8 +560,21 @@ def get_bq_table_partitions(table_id, date_partition_field,
 def remove_loaded_objects(objects, dataset, alias):
     """
     Remove objects from list that have already been loaded
-    into the BigQuery table.
+    into the BigQuery table. We do this so we don't load objects
+    that have already been loaded into BigQuery.
+
+    We assume that based on `get_bq_table_partitions` returned data
+    that the original load job completed successfully.
+
+    If the BigQuery table does not exist we assume that no data
+    has been loaded and return the original objects list.
+
+    If the BigQuery table does exist we query it based on the partition
+    information extracted from the object key and remove and return
+    objects from the list.
+
     """
+
     initial_object_tmp = list(objects)[0]
     meta = _get_object_key_metadata(initial_object_tmp)
     dp = meta['date_partition']
