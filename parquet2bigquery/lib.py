@@ -352,10 +352,9 @@ def check_bq_table_exists(table_id, dataset):
     client, table_ref = get_bq_client(table_id, dataset)
 
     try:
-        table = client.get_table(table_ref)
-        if table:
-            logging.info('{}: table exists.'.format(table_id))
-            return True
+        client.get_table(table_ref)
+        logging.info('{}: table exists.'.format(table_id))
+        return True
     except google.api_core.exceptions.NotFound:
         logging.info('{}: table does not exist.'.format(table_id))
         return False
