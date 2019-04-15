@@ -1,6 +1,6 @@
 FROM python:3-slim
 
-WORKDIR /var/tmp/p2b
+WORKDIR /app
 
 COPY . ./
 
