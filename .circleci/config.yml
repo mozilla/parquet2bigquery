@@ -42,22 +42,26 @@ jobs:
     docker:
       - image: docker:18.02.0-ce
     steps:
-      - checkout
       - setup_remote_docker
       - restore_cache:
           key: v1-{{.Branch}}
       - run:
           name: Restore Docker image cache
           command: docker load -i /cache/docker.tar
-
       - run:
-          name: Push to Dockerhub
+          name: Deploy to Dockerhub
           command: |
+            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+            # deploy master
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              ./bin/deploy-dockerhub.sh latest
-            fi
-            if [ -n "${CIRCLE_TAG}" ]; then
-              ./bin/deploy-dockerhub.sh "$CIRCLE_TAG"
+              docker tag app:build ${DOCKERHUB_REPO}:latest
+              docker push ${DOCKERHUB_REPO}:latest
+            elif  [ ! -z "${CIRCLE_TAG}" ]; then
+            # deploy a release tag...
+              echo "${DOCKERHUB_REPO}:${CIRCLE_TAG}"
+              docker tag app:build "${DOCKERHUB_REPO}:${CIRCLE_TAG}"
+              docker images
+              docker push "${DOCKERHUB_REPO}:${CIRCLE_TAG}"
             fi
 workflows:
   version: 2
