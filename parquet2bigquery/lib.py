@@ -409,11 +409,8 @@ def get_latest_object(bucket_name, prefix, delimiter=None):
     for blob in blobs:
         if not ignore_key(blob.name):
             path = '/'.join(blob.name.split('/')[0:-1])
-            if _latest_objects_timestamp.get(path):
-                if _latest_objects_timestamp[path] < blob.updated:
-                    _latest_objects_timestamp[path] = blob.updated
-                    latest_objects[path] = blob.name
-            else:
+            if path not in _latest_objects_timestamp \
+                    or _latest_objects_timestamp[path] < blob.updated:
                 _latest_objects_timestamp[path] = blob.updated
                 latest_objects[path] = blob.name
 
