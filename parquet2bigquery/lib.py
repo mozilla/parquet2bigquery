@@ -515,7 +515,9 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
 
 
 def get_bq_table_partitions(table_id, date_partition_field,
-                            data_partition_format,
+                            date_partition_format,
+                            date_partition_min,
+                            date_partition_max,
                             path_prefix,
                             dataset, partitions=[]):
     """
@@ -528,7 +530,7 @@ def get_bq_table_partitions(table_id, date_partition_field,
     reconstruct_paths = []
 
     reformat_dp_field = ("FORMAT_DATE('{0}', {1})"
-                         " as {1}".format(data_partition_format,
+                         " as {1}".format(date_partition_format,
                                           date_partition_field))
 
     select_cols.append(reformat_dp_field)
@@ -544,8 +546,10 @@ def get_bq_table_partitions(table_id, date_partition_field,
     query = """
     SELECT {2}
     FROM {0}.{1}
+    WHERE {4} >= DATE '{5}' and {4} <= DATE '{6}'
     GROUP BY {3}
-    """.format(dataset, table_id, _select_cols, group_cols)
+    """.format(dataset, table_id, _select_cols, group_cols,
+               date_partition_field, date_partition_min, date_partition_max)
 
     query_job = client.query(query)
     results = query_job.result()
@@ -581,6 +585,14 @@ def remove_loaded_objects(objects, dataset, alias):
     initial_object_tmp = list(objects)[0]
     meta = _get_object_key_metadata(initial_object_tmp)
     dp = meta['date_partition']
+    dp_values = sorted([
+        parse(value).strftime('%Y-%m-%d')
+        for value in {
+            item.split('/')[meta['first_part_idx']].split('=')[1]
+            for item in objects
+        }
+    ])
+    dp_min, dp_max = dp_values[0], dp_values[-1]
 
     path_prefix = initial_object_tmp.split('/')[:meta['first_part_idx']]
 
@@ -592,6 +604,8 @@ def remove_loaded_objects(objects, dataset, alias):
     object_paths = get_bq_table_partitions(table_id,
                                            dp['field'],
                                            dp['format'],
+                                           dp_min,
+                                           dp_max,
                                            path_prefix,
                                            dataset,
                                            meta['partitions'])
