@@ -7,6 +7,7 @@ from multiprocessing import Process, JoinableQueue, Lock
 
 import google.api_core.exceptions
 from google.cloud import storage, bigquery
+from google.cloud.bigquery.schema import SchemaField
 from google.cloud.bigquery.table import TimePartitioning, TimePartitioningType
 
 
@@ -304,14 +305,17 @@ def get_schema_additions(current_schema, newest_schema):
 
 def construct_select_query(table_id, date_partition_field,
                            date_partition_value, partitions=None,
-                           dataset=DEFAULT_TMP_DATASET):
+                           dataset=DEFAULT_TMP_DATASET, unnest_maps=False):
 
     """
     Construct a query to select all data from a temp table, append
     the relevant partitions and output into the primary table.
     """
 
-    select_cols = ['SELECT *']
+    if unnest_maps:
+        select_cols = get_unnested_select_columns(table_id, dataset)
+    else:
+        select_cols = ['*']
 
     select_cols.append("CAST('{0}' AS DATE) "
                        "as {1}".format(date_partition_value,
@@ -324,7 +328,7 @@ def construct_select_query(table_id, date_partition_field,
     _select_cols = ','.join(select_cols)
 
     query = """
-    {0}
+    SELECT {0}
     FROM {1}.{2}
     """.format(_select_cols, dataset, table_id)
 
@@ -428,7 +432,7 @@ def create_primary_bq_table(table_id, dataset,
 
 
 def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
-        alias=None):
+        alias=None, unnest_maps=False):
     """
     Take object(s) and load them into BigQuery.
     """
@@ -446,11 +450,6 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
     table_id_tmp = normalize_table_id('_'.join([meta['table_id'],
                                       dp['value'],
                                       gen_rand_string()]))
-
-    query = construct_select_query(table_id_tmp,
-                                   dp['field'],
-                                   dp['value'],
-                                   partitions=meta['partitions'])
 
     # We assume that the data will have the following extensions
     if path:
@@ -482,6 +481,9 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
         logging.exception('{}: GCS Retryable Error.'.format(table_id))
         raise P2BWarning('GCS Retryable Error.')
 
+    if unnest_maps:
+        new_schema = unnest_schema(new_schema)
+
     # Try to create the primary BigQuery table
     with lock:
         create_primary_bq_table(table_id, dest_dataset, new_schema,
@@ -501,6 +503,12 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
                                    object_key_load,
                                    table_id_tmp))
     # Try to load the temp table data into primary table
+    query = construct_select_query(table_id_tmp,
+                                   dp['field'],
+                                   dp['value'],
+                                   partitions=meta['partitions'],
+                                   unnest_maps=unnest_maps)
+
     try:
         load_bq_query_to_table(query, table_id, dest_dataset)
     except (google.api_core.exceptions.InternalServerError,
@@ -614,7 +622,7 @@ def remove_loaded_objects(objects, dataset, alias):
     return objects
 
 
-def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
+def bulk(bucket_name, prefix, concurrency, glob_load, resume_load, unnest_maps,
          dest_dataset=None, alias=None):
     """
     Load data into BigQuery concurrently
@@ -624,6 +632,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         concurrency: number of processes to handle the load (int)
         glob_load: load data by globbing path dirs (boolean)
         resume_load: resume load (boolean)
+        unnest_maps: unnest map-like structs (boolean)
         dest_dataset: override default dataset location (str)
         alias: override object key dervived table name (str)
     """
@@ -651,7 +660,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
             q.put((bucket_name, None, object_key))
 
     for c in range(concurrency):
-        p = Process(target=_bulk_run, args=(c, lock, q, _dest_dataset, alias,))
+        p = Process(target=_bulk_run, args=(c, lock, q, _dest_dataset, alias, unnest_maps))
         p.daemon = True
         p.start()
 
@@ -666,7 +675,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     logging.info('main_process: done')
 
 
-def _bulk_run(process_id, lock, q, dest_dataset, alias):
+def _bulk_run(process_id, lock, q, dest_dataset, alias, unnest_maps):
     """
     Process run job
     """
@@ -678,7 +687,7 @@ def _bulk_run(process_id, lock, q, dest_dataset, alias):
             ok = object_key if path is None else path
             logging.info('Process-{}: running {}'.format(process_id, ok))
             run(bucket_name, object_key, dest_dataset, path=path,
-                lock=lock, alias=alias)
+                lock=lock, alias=alias, unnest_maps=unnest_maps)
         except P2BWarning:
             q.put(item)
             logging.warning('Process-{}: Re-queued {} '
@@ -690,3 +699,44 @@ def _bulk_run(process_id, lock, q, dest_dataset, alias):
                          'in queue'.format(process_id, q.qsize()))
     q.task_done()
     logging.info('Process-{}: done'.format(process_id))
+
+
+def get_unnested_field_selector(schema_field):
+    subfields = schema_field.fields
+    # We unnest the extra key_vale field in structs that look like: struct(array(struct(key, value)) as key_value)
+    if len(subfields) == 1 and subfields[0].name == 'key_value' \
+        and [f.name for f in subfields[0].fields] == ['key', 'value']:
+        name = schema_field.name
+        # Unfortunately, we have some instances of nested maps, so we recurse down the subfield tree
+        k_select = get_unnested_field_selector(subfields[0].fields[0])
+        v_select = get_unnested_field_selector(subfields[0].fields[1])
+        return f"ARRAY(SELECT AS STRUCT {k_select}, {v_select} from unnest({name}.key_value)) as {name}"
+    else:
+        return schema_field.name
+
+
+def get_unnested_select_columns(table_id, dataset):
+    schema = get_bq_table_schema(table_id, dataset)
+    return [get_unnested_field_selector(field) for field in schema]
+
+
+def unnest_schema_field(schema_field):
+    subfields = schema_field.fields
+    # We unnest the extra key_vale field in structs that look like: struct(array(struct(key, value)) as key_value)
+    if len(subfields) == 1 and subfields[0].name == 'key_value' \
+        and [f.name for f in subfields[0].fields] == ['key', 'value']:
+        k_subfield = unnest_schema_field(subfields[0].fields[0])
+        v_subfield = unnest_schema_field(subfields[0].fields[1])
+        return SchemaField(
+            schema_field.name,
+            schema_field.field_type,
+            subfields[0].mode,
+            schema_field.description,
+            (k_subfield, v_subfield))
+    else:
+        return schema_field
+
+
+def unnest_schema(schema):
+    return [unnest_schema_field(f) for f in schema]
+

@@ -51,10 +51,21 @@ def main():
 
     parser.set_defaults(resume_load=True)
 
+    unnest_group = parser.add_mutually_exclusive_group()
+
+    resume_group.add_argument("-u", "--unnest",
+                              dest='unnest_maps',
+                              action="store_true")
+    resume_group.add_argument("-U", "--no-unnest",
+                              dest='unnest_maps',
+                              action="store_false")
+
+    parser.set_defaults(unnest_maps=False)
+
     args = parser.parse_args()
 
     bulk(args.bucket, args.prefix, args.concurrency, args.glob_load,
-         args.resume_load, dest_dataset=args.dataset, alias=args.alias)
+         args.resume_load, args.unnest_maps, dest_dataset=args.dataset, alias=args.alias)
 
 
 if __name__ == '__main__':
