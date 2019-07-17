@@ -23,6 +23,18 @@ def main():
                         help="BigQuery Table Alias",
                         action="store", required=False)
 
+    parser.add_argument("--cluster-by",
+                        help="BigQuery Table Clustering Fields",
+                        nargs="+", required=False)
+
+    parser.add_argument("--drop",
+                        help="Parquet Fields to Drop",
+                        nargs="+", required=False)
+
+    parser.add_argument("--replace",
+                        help="Parquet Field Replacement Expressions",
+                        nargs="+", required=False)
+
     parser.add_argument("-c", "--concurrency",
                         help="Process concurrency",
                         default=10,
@@ -54,7 +66,8 @@ def main():
     args = parser.parse_args()
 
     bulk(args.bucket, args.prefix, args.concurrency, args.glob_load,
-         args.resume_load, dest_dataset=args.dataset, alias=args.alias)
+         args.resume_load, dest_dataset=args.dataset, alias=args.alias,
+         args.cluster_by, args.drop, args.replace)
 
 
 if __name__ == '__main__':
