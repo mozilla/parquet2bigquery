@@ -204,7 +204,10 @@ def get_bq_query_schema(query):
     """
     job_config = bigquery.QueryJobConfig(dry_run=True)
     job = bigquery.Client().query(query, job_config=job_config)
-    return job._job_statistics()['schema']['fields']
+    return [
+        bigquery.SchemaField.from_api_repr(field)
+        for field in job._job_statistics()['schema']['fields']
+    ]
 
 
 def load_parquet_to_bq(bucket, object_key, table_id, dataset, schema=None,
