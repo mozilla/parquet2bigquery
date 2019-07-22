@@ -3,6 +3,7 @@ import re
 import secrets
 from dateutil.parser import parse
 from datetime import datetime
+from itertools import chain
 from multiprocessing import Process, JoinableQueue, Lock
 
 import google.api_core.exceptions
@@ -294,9 +295,9 @@ def get_schema_additions(current_schema, newest_schema):
     return schema_additions
 
 
-def construct_select_query(table_id, date_partition_field,
-                           date_partition_value, partitions=None,
-                           dataset=DEFAULT_TMP_DATASET, drop=(), replace=()):
+def construct_select_query(table_id, date_partition_field, date_partition_value,
+                           partitions=None, dataset=DEFAULT_TMP_DATASET, drop=(),
+                           rename={}, replace=()):
 
     """
     Construct a query to select all data from a temp table, append
@@ -319,10 +320,13 @@ def construct_select_query(table_id, date_partition_field,
     FROM {1}.{2}
     """.format(_select_cols, dataset, table_id)
 
-    if drop or replace:
-        except_clause = " EXCEPT ({0})".format(",".join(drop)) if drop else ""
+    if drop or rename or replace:
+        rename_clause = "".join("{0} AS {1}, ".format(*pair) for pair in rename.items())
+        drop_fields = ",".join(chain(drop, rename.keys()))
+        except_clause = " EXCEPT ({0})".format(drop_fields) if drop_fields else ""
         replace_clause = " REPLACE ({0})".format(",".join(replace)) if replace else ""
-        return "SELECT *{0}{1} FROM ({2})".format(except_clause, replace_clause, query)
+        return "SELECT {0}*{1}{2} FROM ({3})".format(rename_clause, except_clause,
+                                                     replace_clause, query)
 
     return query
 
@@ -424,7 +428,7 @@ def create_primary_bq_table(table_id, dataset,
 
 
 def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
-        alias=None, cluster_by=(), drop=(), replace=()):
+        alias=None, cluster_by=(), drop=(), rename={}, replace=()):
     """
     Take object(s) and load them into BigQuery.
     """
@@ -448,6 +452,7 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
                                    dp['value'],
                                    partitions=meta['partitions'],
                                    drop=drop,
+                                   rename=rename,
                                    replace=replace)
 
     # We assume that the data will have the following extensions
@@ -480,7 +485,7 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
     # Try to create the primary BigQuery table
     with lock:
         create_primary_bq_table(table_id, dest_dataset, new_schema,
-                                dp['field'], cluster_by)
+                                rename.get(dp['field'], dp['field']), cluster_by)
 
     # Compare temp table schema with primary table schema
     current_schema = get_bq_table_schema(table_id, dest_dataset)
@@ -511,7 +516,7 @@ def get_bq_table_partitions(table_id, date_partition_field,
                             date_partition_min,
                             date_partition_max,
                             path_prefix,
-                            dataset, partitions=[]):
+                            dataset, partitions=[], rename={}):
     """
     Get all the partitions available in a BigQuery table.
     This is used for resume operations.
@@ -521,19 +526,19 @@ def get_bq_table_partitions(table_id, date_partition_field,
     select_cols = []
     reconstruct_paths = []
 
+    dp_renamed = rename.get(date_partition_field, date_partition_field)
     reformat_dp_field = ("FORMAT_DATE('{0}', {1})"
                          " as {1}".format(date_partition_format,
-                                          date_partition_field))
-
-    select_cols.append(reformat_dp_field)
+                                          dp_renamed))
 
     for partition in partitions:
-        select_cols.append(partition[0])
+        name = partition[0]
+        select_cols += [(name, rename.get(name, name))]
 
-    _select_cols = ','.join(select_cols)
+    _select_cols = ','.join(chain([reformat_dp_field], (c[1] for c in select_cols)))
 
-    select_cols[0] = date_partition_field
-    group_cols = ','.join(select_cols)
+    select_cols = [(date_partition_field, dp_renamed)] + select_cols
+    group_cols = ','.join(c[1] for c in select_cols)
 
     query = """
     SELECT {2}
@@ -549,14 +554,14 @@ def get_bq_table_partitions(table_id, date_partition_field,
     for row in results:
         tmp_path = []
         tmp_path += path_prefix
-        for item in select_cols:
-            tmp_path.append('{}={}'.format(item, row[item]))
+        for part, field in select_cols:
+            tmp_path.append('{}={}'.format(part, row[field]))
         reconstruct_paths.append('/'.join(tmp_path))
 
     return reconstruct_paths
 
 
-def remove_loaded_objects(objects, dataset, alias):
+def remove_loaded_objects(objects, dataset, alias, rename):
     """
     Remove objects from list that have already been loaded
     into the BigQuery table. We do this so we don't load objects
@@ -600,7 +605,8 @@ def remove_loaded_objects(objects, dataset, alias):
                                            dp_max,
                                            path_prefix,
                                            dataset,
-                                           meta['partitions'])
+                                           meta['partitions'],
+                                           rename)
 
     for key in object_paths:
         if objects.pop(key, False):
@@ -610,7 +616,7 @@ def remove_loaded_objects(objects, dataset, alias):
 
 
 def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
-         dest_dataset=None, alias=None, cluster_by=(), drop=(), replace=()):
+         dest_dataset=None, alias=None, cluster_by=(), drop=(), rename={}, replace=()):
     """
     Load data into BigQuery concurrently
     Args:
@@ -623,6 +629,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         alias: override object key derived table name (str)
         cluster_by: top level fields to cluster by (Tuple[str])
         drop: top level fields to exclude (Tuple[str])
+        rename: top level fields to rename (Dict[str,str])
         replace: top field replacement expressions (Tuple[str])
     """
 
@@ -638,7 +645,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         object_keys = get_latest_object(bucket_name, prefix)
         if resume_load:
             object_keys = remove_loaded_objects(object_keys,
-                                                _dest_dataset, alias)
+                                                _dest_dataset, alias, rename)
 
         for path, object_key in object_keys.items():
             q.put((bucket_name, path, object_key))
@@ -648,7 +655,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         for object_key in object_keys:
             q.put((bucket_name, None, object_key))
 
-    args = (lock, q, _dest_dataset, alias, cluster_by, drop, replace)
+    args = (lock, q, _dest_dataset, alias, cluster_by, drop, rename, replace)
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c,) + args)
         p.daemon = True
@@ -665,7 +672,8 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     logging.info('main_process: done')
 
 
-def _bulk_run(process_id, lock, q, dest_dataset, alias, cluster_by, drop, replace):
+def _bulk_run(process_id, lock, q, dest_dataset, alias, cluster_by, drop, rename,
+              replace):
     """
     Process run job
     """
@@ -678,7 +686,7 @@ def _bulk_run(process_id, lock, q, dest_dataset, alias, cluster_by, drop, replac
             logging.info('Process-{}: running {}'.format(process_id, ok))
             run(bucket_name, object_key, dest_dataset, path=path,
                 lock=lock, alias=alias, cluster_by=cluster_by, drop=drop,
-                replace=replace)
+                rename=rename, replace=replace)
         except P2BWarning:
             q.put(item)
             logging.warning('Process-{}: Re-queued {} '
