@@ -498,7 +498,12 @@ def run(bucket_name, object_key, dest_dataset, path=None, lock=None,
 
     # If there are additions then update the primary table
     if len(schema_additions) > 0:
-        update_bq_table_schema(table_id, schema_additions, dest_dataset)
+        try:
+            update_bq_table_schema(table_id, schema_additions, dest_dataset)
+        except google.api_core.exceptions.PreconditionFailed:
+            delete_bq_table(table_id_tmp)
+            logging.exception('{}: BigQuery Retryable Error. Failed to update schema'.format(table_id))
+            raise P2BWarning('BigQuery Retryable Error.')
 
     logging.info('{}: loading {}/{} to BigQuery '
                  'table {}'.format(table_id,
