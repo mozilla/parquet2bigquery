@@ -195,8 +195,13 @@ def update_bq_table_schema(table_id, schema_additions, dataset):
     new_schema = table.schema[:]
 
     table.schema = new_schema + schema_additions
-    table = client.update_table(table, ['schema'])
-    logging.info('{}: BigQuery table schema updated.'.format(table_id))
+    try:
+        table = client.update_table(table, ['schema'])
+        logging.info('{}: BigQuery table schema updated.'.format(table_id))
+    # Handle cases where the schema addition already occured in another process
+    except google.api_core.exceptions.BadRequest:
+        logging.info('{}: BigQuery table schema updated already.'.format(table_id))
+        pass
 
 
 def get_bq_query_schema(query):
