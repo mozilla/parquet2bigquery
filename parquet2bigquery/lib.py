@@ -32,6 +32,10 @@ class P2BWarning(Exception):
     pass
 
 
+class DateValueError(Exception):
+    pass
+
+
 def get_bq_client(table_id, dataset):
     """
     Returns a tuple that contains the BigQuery client and TableReference.
@@ -61,8 +65,9 @@ def get_date_format(date):
         except ValueError:
             continue
 
-    logging.error('Date format not detected, exiting.')
-    exit
+    logging.warn("{} value is not a supported date format".format(date))
+
+    raise DateValueError
 
 
 def gen_rand_string(size=3):
@@ -132,16 +137,24 @@ def _get_object_key_metadata(object_key):
     meta['table_id'] = normalize_table_id('_'.join([table_name,
                                                     table_version]))
 
-    date_field, date_value = split_key[first_part_idx].split('=')
-    meta['date_partition']['field'] = date_field
-    meta['date_partition']['format'] = get_date_format(date_value)
-    meta['date_partition']['value'] = parse(date_value).strftime('%Y-%m-%d')
+    for element in split_key[first_part_idx:]:
+        if '=' in element:
+            partition = element.split('=')
+            # we are attempting to find the date partition in all the elements
+            # instead of the first
+            try:
+                meta['date_partition']['format'] = get_date_format(partition[1])
+                meta['date_partition']['field'] = partition[0]
+                meta['date_partition']['value'] = parse(partition[1]).strftime('%Y-%m-%d')
+            # not a date partition or we don't support the date format
+            except DateValueError:
+                meta['partitions'].append(partition)
 
-    # try to get additional partition information
-    extra_partitions = [elem.split('=')
-                        for elem in split_key[first_part_idx+1:]
-                        if '=' in elem]
-    meta['partitions'] += extra_partitions
+    # if there is no date partition just add one that equals to datetime.now
+    if len(meta['date_partition']) == 0:
+        meta['date_partition']['format'] = '%Y-%m-%d'
+        meta['date_partition']['field'] = 'bq_load_date'
+        meta['date_partition']['value'] = datetime.now().strftime('%Y-%m-%d')
 
     return meta
 
