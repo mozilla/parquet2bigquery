@@ -556,7 +556,7 @@ def get_bq_table_partitions(table_id, date_partition_field,
     WHERE {4} >= DATE '{5}' and {4} <= DATE '{6}'
     GROUP BY {3}
     """.format(dataset, table_id, _select_cols, group_cols,
-               date_partition_field, date_partition_min, date_partition_max)
+               dp_renamed, date_partition_min, date_partition_max)
 
     query_job = client.query(query)
     results = query_job.result()
