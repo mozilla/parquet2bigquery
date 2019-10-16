@@ -38,7 +38,8 @@ def get_bq_client(table_id, dataset):
 
     """
     client = bigquery.Client()
-    dataset_ref = client.dataset(dataset)
+    # split into project and dataset, then reverse for correct argument order
+    dataset_ref = client.dataset(*dataset.split(".")[::-1])
     table_ref = dataset_ref.table(table_id)
 
     return client, table_ref
