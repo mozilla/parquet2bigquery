@@ -4,7 +4,7 @@ import secrets
 from dateutil.parser import parse
 from datetime import datetime
 from itertools import chain
-from multiprocessing import Process, JoinableQueue, Lock
+from multiprocessing import Process, JoinableQueue, Queue, Lock
 
 import google.api_core.exceptions
 from google.cloud import storage, bigquery
@@ -627,7 +627,8 @@ def remove_loaded_objects(objects, dataset, alias, rename):
 
 
 def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
-         dest_dataset=None, alias=None, cluster_by=(), drop=(), rename={}, replace=()):
+         dest_dataset=None, alias=None, cluster_by=(), drop=(), rename={},
+         replace=()):
     """
     Load data into BigQuery concurrently
     Args:
@@ -649,6 +650,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
     logging.info('main_process: dataset set to {}'.format(_dest_dataset))
 
     q = JoinableQueue()
+    msg = Queue()
     lock = Lock()
 
     if glob_load:
@@ -666,7 +668,7 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         for object_key in object_keys:
             q.put((bucket_name, None, object_key))
 
-    args = (lock, q, _dest_dataset, alias, cluster_by, drop, rename, replace)
+    args = (lock, q, msg, _dest_dataset, alias, cluster_by, drop, rename, replace)
     for c in range(concurrency):
         p = Process(target=_bulk_run, args=(c,) + args)
         p.daemon = True
@@ -680,11 +682,25 @@ def bulk(bucket_name, prefix, concurrency, glob_load, resume_load,
         q.put(None)
 
     p.join()
-    logging.info('main_process: done')
+
+    # if the msg queue is not empty it indicates that an exception occured in
+    # the child process. exit 1 to indicate a failure event.
+    # we only send error type messages right now but in the future we could
+    # potentially have others
+    if msg.empty():
+        logging.info('main_process: done')
+        exit(0)
+    else:
+        logging.error('main_process: exceptions occured in child processes')
+        while not msg.empty():
+            error_msg = msg.get()
+            logging.error('main_process: {} had error {}'.format(error_msg[1],
+                                                                 error_msg[2]))
+        exit(1)
 
 
-def _bulk_run(process_id, lock, q, dest_dataset, alias, cluster_by, drop, rename,
-              replace):
+def _bulk_run(process_id, lock, q, msg, dest_dataset, alias, cluster_by, drop,
+              rename, replace):
     """
     Process run job
     """
@@ -703,6 +719,14 @@ def _bulk_run(process_id, lock, q, dest_dataset, alias, cluster_by, drop, rename
             logging.warning('Process-{}: Re-queued {} '
                             'due to warning'.format(process_id,
                                                     ok))
+        except Exception as e:
+            # an unhandled exception has occured and we send a message back to
+            # the main process to handle
+            error_msg = ('error', 'Process-{}'.format(process_id), e)
+            logging.error('Process-{}: exception {}. '
+                          'Notifying main process '
+                          'to handle'.format(process_id, e))
+            msg.put(error_msg)
         finally:
             q.task_done()
             logging.info('Process-{}: {} tasks left '
